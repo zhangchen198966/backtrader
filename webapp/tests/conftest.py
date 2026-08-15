@@ -50,9 +50,24 @@ def simple_backtest_request(paths, template='sma_rsi_atr', params=None, mode='ba
 
 @pytest.fixture(scope='session')
 def live_server():
-    """在 8601 端口启动真实服务（E2E 用）"""
+    """在 8601 端口启动真实服务（E2E 用）；预置迷你股票清单缓存避免测试触网"""
     import httpx
     import socket
+    cache_dir = os.path.join(WEBAPP_DIR, 'cache')
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_file = os.path.join(cache_dir, 'stock_list.json')
+    if not os.path.isfile(cache_file):
+        seed = [
+            {'code': '600519', 'name': '贵州茅台'},
+            {'code': '000858', 'name': '五粮液'},
+            {'code': '300750', 'name': '宁德时代'},
+            {'code': '000002', 'name': '万  科Ａ'},
+            {'code': '600036', 'name': '招商银行'},
+            {'code': '000001', 'name': '平安银行'},
+        ]
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump(seed, f, ensure_ascii=False)
+
     port = 8601
     with socket.socket() as s:
         s.bind(('127.0.0.1', port))

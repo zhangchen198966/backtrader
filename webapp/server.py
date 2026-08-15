@@ -19,6 +19,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from webapp.datainspect import inspect_csv
+from webapp.datasource import (PROVIDERS, FetchError, fetch_to_csv,
+                               search_indexes, search_stocks)
 from webapp.glossary import get_glossary
 from webapp.templates import TEMPLATES
 
@@ -208,6 +210,13 @@ class InspectBody(BaseModel):
     path: str
 
 
+class FetchBody(BaseModel):
+    provider: str
+    symbol: str
+    start: str
+    end: str
+
+
 class RunBody(BaseModel):
     mode: str = 'backtest'
 
@@ -245,6 +254,61 @@ async def api_upload(file: UploadFile = File(...)):
     info = inspect_csv(dest)
     info['path'] = os.path.relpath(dest, REPO_ROOT)
     return info
+
+
+@app.get('/api/datas/providers')
+def api_providers():
+    """在线数据源列表（前端下拉）"""
+    return {'providers': [
+        {'id': pid, 'label': m['label'], 'hint': m['hint']}
+        for pid, m in PROVIDERS.items()
+    ]}
+
+
+@app.get('/api/datas/search')
+def api_search(q: str = '', provider: str = 'akshare-a'):
+    """股票/指数代码搜索（支持中文名）。清单加载失败不影响手输代码。"""
+    try:
+        if provider == 'akshare-index':
+            results = search_indexes(q)
+        elif provider == 'yfinance':
+            results = []  # 无中文名清单，保持手输
+        else:
+            results = search_stocks(q)
+        return {'results': results}
+    except Exception as e:
+        return {'results': [], 'error': f'名称清单暂不可用（{e}），可直接输入代码'}
+
+
+@app.post('/api/datas/fetch')
+def api_fetch(body: FetchBody):
+    """在线拉取数据 → 清洗落盘 uploads/ → 返回探测结果"""
+    try:
+        r = fetch_to_csv(body.provider, body.symbol, body.start, body.end,
+                         UPLOADS_DIR)
+    except FetchError as e:
+        raise HTTPException(400, str(e))
+    path = os.path.relpath(r['path'], REPO_ROOT)
+    info = inspect_csv(r['path'])
+    info['path'] = path
+    info['fetched_rows'] = r['rows']
+    if not info.get('ok'):
+        raise HTTPException(500, '数据已下载但解析失败: %s' % info.get('error'))
+    return info
+
+
+@app.delete('/api/datas')
+def api_datas_delete(path: str):
+    """删除上传的数据文件（仅限 uploads/，框架自带数据不可删）"""
+    target = path if os.path.isabs(path) else os.path.join(REPO_ROOT, path)
+    real = os.path.realpath(target)
+    uploads_real = os.path.realpath(UPLOADS_DIR)
+    if not real.startswith(uploads_real + os.sep):
+        raise HTTPException(403, '只能删除自己上传/拉取的数据文件')
+    if not os.path.isfile(real):
+        raise HTTPException(404, '文件不存在')
+    os.remove(real)
+    return {'deleted': path}
 
 
 @app.get('/api/strategy/templates')
@@ -285,8 +349,9 @@ def api_task_kill(task_id: str):
 
 @app.get('/api/tasks')
 def api_tasks():
+    """最近任务列表（含策略/参数/核心结果摘要，供历史面板展示）"""
     out = []
-    for task_id in sorted(os.listdir(TASKS_DIR), reverse=True)[:10]:
+    for task_id in sorted(os.listdir(TASKS_DIR), reverse=True)[:20]:
         task_dir = os.path.join(TASKS_DIR, task_id)
         if not os.path.isdir(task_dir):
             continue
@@ -303,11 +368,56 @@ def api_tasks():
             item['mode'] = req.get('mode')
             raw_path = (req.get('data') or {}).get('path', '')
             if isinstance(raw_path, list):
-                raw_path = ','.join(os.path.basename(p) for p in raw_path)
-            item['data'] = os.path.basename(raw_path)
-            tpl = strat.get('template_id') or ('自定义代码' if strat.get('source') == 'custom' else '')
-            item['strategy'] = tpl
+                item['data'] = '+'.join(os.path.splitext(os.path.basename(p))[0]
+                                        for p in raw_path)
+            else:
+                item['data'] = os.path.splitext(os.path.basename(raw_path))[0]
+            item['strategy'] = strat.get('template_id') or \
+                ('自定义代码' if strat.get('source') == 'custom' else '')
+            params = strat.get('params') or {}
+            item['params'] = ' '.join(
+                f'{k}={v}' for k, v in params.items()
+                if not isinstance(v, dict))[:120]
         except (OSError, ValueError, TypeError):
+            pass
+        # 结果摘要
+        try:
+            with open(os.path.join(task_dir, 'result.json')) as f:
+                res = json.load(f)
+            if res.get('mode') == 'optimize':
+                rows = res.get('rows') or []
+                best = rows[0]['annual_pct'] if rows else None
+                item['summary'] = f"{res.get('total', 0)} 组 · 最优 " \
+                    f"{('+' if (best or 0) > 0 else '')}{best}%"
+            else:
+                runs = res.get('runs') or [{}]
+                s = runs[0].get('summary') or {}
+                tr = s.get('total_return_pct')
+                item['summary'] = \
+                    f"收益 {('+' if (tr or 0) > 0 else '')}{tr}%"
+                if len(runs) > 1:
+                    item['summary'] += f" · {len(runs)} 数据对比"
+        except (OSError, ValueError):
             pass
         out.append(item)
     return {'tasks': out}
+
+
+@app.delete('/api/task/{task_id}')
+def api_task_delete(task_id: str):
+    """删除一个历史任务（运行中的任务需先终止）"""
+    if not re.fullmatch(r'[0-9a-zA-Z\-]+', task_id):
+        raise HTTPException(404, '任务不存在')
+    task_dir = os.path.join(TASKS_DIR, task_id)
+    if not os.path.isdir(task_dir):
+        raise HTTPException(404, '任务不存在')
+    with manager.lock:
+        is_current = manager.current == task_id
+    if is_current:
+        raise HTTPException(400, '任务正在运行，请先终止')
+    if task_id in manager.queue:
+        with manager.lock:
+            manager.queue = deque(t for t in manager.queue if t != task_id)
+    import shutil
+    shutil.rmtree(task_dir, ignore_errors=True)
+    return {'deleted': task_id}

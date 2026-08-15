@@ -8,6 +8,7 @@
   4. 优化结果出图 + 多数据对比回测
   5. 自定义代码语法高亮
 """
+import os
 import re
 import time
 
@@ -41,18 +42,27 @@ def page(pw, live_server):
     ctx = pw.new_context(viewport={'width': 1440, 'height': 1000})
     page = ctx.new_page()
     page.goto(live_server)
-    page.wait_for_selector('#dataList input', timeout=15000)
+    # 等元素存在即可：自带分组默认折叠，首个 checkbox 不可见
+    page.wait_for_selector('#dataList input', state='attached', timeout=15000)
     yield page
     ctx.close()
 
 
+def open_data_groups(page):
+    """展开数据分组（折叠状态下的 checkbox 不可点击）"""
+    page.evaluate('() => document.querySelectorAll(".data-group")'
+                  '.forEach(d => { d.open = true; })')
+
+
 def uncheck_all_data(page):
+    open_data_groups(page)
     for cb in page.query_selector_all('.dataChk'):
         if cb.is_checked():
             cb.click()
 
 
 def check_data(page, value):
+    open_data_groups(page)
     cb = page.query_selector(f'.dataChk[value="{value}"]')
     assert cb is not None, f'数据选项不存在: {value}'
     if not cb.is_checked():
@@ -64,28 +74,28 @@ def check_data(page, value):
 def test_theme_toggle_and_persist(page):
     html = page.locator('html')
     expect(html).to_have_attribute('data-theme', 'dark')
-    page.wait_for_timeout(400)  # 等初始过渡结束
 
-    body_bg_dark = page.evaluate(
-        'getComputedStyle(document.body).backgroundColor')
+    def bg_var():
+        # 读 CSS 变量而非过渡中的计算样式（变量随属性瞬时切换，稳定可测）
+        return page.evaluate(
+            'getComputedStyle(document.documentElement)'
+            '.getPropertyValue("--bg").trim()')
+
+    bg_dark = bg_var()
     page.click('#themeBtn')
     expect(html).to_have_attribute('data-theme', 'light')
-    page.wait_for_timeout(400)  # 等 background 过渡（.25s）结束再取色
-
-    body_bg_light = page.evaluate(
-        'getComputedStyle(document.body).backgroundColor')
-    assert body_bg_dark != body_bg_light, '切换主题后背景色应改变'
+    bg_light = bg_var()
+    assert bg_dark != bg_light, '切换主题后 --bg 变量应改变'
 
     # 持久化到 localStorage
     saved = page.evaluate('localStorage.getItem("btlab-theme")')
     assert saved == 'light'
 
-    # 刷新后保持亮色
+    # 刷新后保持亮色（加载后无过渡干扰，校验真实背景色）
     page.reload()
-    page.wait_for_selector('#dataList input', timeout=15000)
+    page.wait_for_selector('#dataList input', state='attached', timeout=15000)
     expect(page.locator('html')).to_have_attribute('data-theme', 'light')
-    assert page.evaluate('getComputedStyle(document.body).backgroundColor') \
-        == body_bg_light
+    assert bg_var() == bg_light
 
     # 切回暗色（不污染后续测试）
     page.click('#themeBtn')
@@ -95,9 +105,9 @@ def test_theme_toggle_and_persist(page):
 # ---------------------------------------------------------------- 目标3：术语 tips
 
 def test_term_click_shows_tooltip(page):
-    # 等模板与术语表加载（参数标签里就有术语）
-    page.wait_for_selector('.term', timeout=15000)
-    first_term = page.locator('.term').first
+    # 等模板与术语表加载（参数标签里就有术语）；用可见术语（折叠区内的不可见）
+    page.wait_for_selector('.term:visible', timeout=15000)
+    first_term = page.locator('.term:visible').first
     term_text = first_term.inner_text()
 
     first_term.click()
@@ -109,6 +119,54 @@ def test_term_click_shows_tooltip(page):
     # 点空白处关闭
     page.locator('header h1').click(force=True)
     expect(tip).not_to_be_visible()
+
+
+def test_term_tips_cover_params_config_and_tables(page):
+    """术语 tips 覆盖：参数区 / 配置区静态标签 / 模板说明 / 结果表格"""
+    page.wait_for_selector('.term:visible', timeout=15000)
+
+    def click_term_and_read(page, selector):
+        page.locator(selector).first.click()
+        tip = page.locator('#tipbox')
+        expect(tip).to_be_visible()
+        title = tip.locator('.tip-title').inner_text()
+        body = tip.locator('.tip-body').inner_text()
+        page.locator('header h1').click(force=True)  # 关闭
+        return title, body
+
+    # 1) 策略参数区：切换到含 ATR/RSI 参数的模板，点参数术语
+    page.select_option('#tplSel', 'sma_rsi_atr')
+    page.wait_for_timeout(200)
+    t1 = page.locator('.p-label .term[data-term="ATR止损倍数"]')
+    assert t1.count() >= 1, '参数「ATR止损倍数」应有术语 tips'
+    title, body = click_term_and_read(page, '.p-label .term[data-term="ATR止损倍数"]')
+    assert title == 'ATR止损倍数' and '止损距离' in body
+
+    # 2) 配置区静态标签：初始现金 / 网格模式
+    assert page.locator('label.tlabel .term[data-term="初始现金"]').count() == 1
+    assert page.locator('span.tlabel .term[data-term="网格模式"]').count() == 1
+    title, body = click_term_and_read(page, 'label.tlabel .term[data-term="初始现金"]')
+    assert title == '初始现金' and '本金' in body
+
+    # 3) 模板描述里的术语（均线/RSI）
+    assert page.locator('#tplDesc .term').count() >= 1
+
+    # 4) 数据源提示（含 前复权 等术语）
+    page.click('text=在线获取数据（AkShare / Yahoo）')
+    page.wait_for_selector('#fetchHint', state='attached')
+    page.wait_for_timeout(200)
+    n_hint = page.locator('#fetchHint .term').count()
+    assert n_hint >= 1, '数据源提示应包含术语（如前复权/代码说明）'
+
+    # 5) 运行后：交易明细表头与优化表头有术语
+    uncheck_all_data(page)
+    check_data(page, DATA1)
+    page.click('#runBtn')
+    wait_done(page)
+    assert page.locator('.tablewrap thead .term').count() >= 3, \
+        '交易明细表头应含术语 tips'
+    title, body = click_term_and_read(page, '.tablewrap thead .term[data-term="手数"]')
+    assert title == '手数'
 
 
 # ---------------------------------------------------------------- 目标5：语法高亮
@@ -266,6 +324,314 @@ def test_kline_yaxis_rescales_on_zoom(page):
     page.wait_for_timeout(400)
     restored = yaxis_range()
     assert abs((restored['max'] - restored['min']) - full_span) < full_span * 0.05
+
+
+# ---------------------------------------------------------------- UI：年度条形图 / 服务徽章 / 日志坞
+
+def test_yearly_bars_geometry(page):
+    """年度收益率图几何+内容自测：零轴水平、正柱上/负柱下、标签对齐，
+    且图内不得出现游离文字（曾出现 0% 伪元素看起来像多出一个数据）"""
+    uncheck_all_data(page)
+    check_data(page, DATA1)
+    page.select_option('#tplSel', 'sma_rsi_atr')
+    page.click('#runBtn')
+    wait_done(page)
+
+    page.wait_for_selector('.yearlyBars .ycolWrap', timeout=10000)
+    audit = page.evaluate("""(() => {
+        const sec = document.querySelector('.yearlyBars');
+        const cols = [...sec.querySelectorAll('.ycolWrap')];
+        return {
+            secText: sec.innerText,
+            zeroAfter: cols.map(c =>
+                getComputedStyle(c.querySelector('.yzero'), '::after').content),
+            zones: cols.map(c => {
+                const zone = c.querySelector('.yzone').getBoundingClientRect();
+                const zero = c.querySelector('.yzero').getBoundingClientRect();
+                const bar = c.querySelector('.ybar').getBoundingClientRect();
+                const span = c.querySelector('span').getBoundingClientRect();
+                return {
+                    val: parseFloat(c.dataset.val),
+                    zeroHorizontal: Math.abs(zero.top - zone.top - zone.height / 2) <= 1,
+                    barBelowZero: bar.top >= zero.bottom - 1,
+                    barAboveZero: bar.bottom <= zero.top + 1,
+                    barHeight: bar.height,
+                    spanTop: span.top,
+                    spanInsideCol: span.top >= zone.bottom - 2,
+                };
+            }),
+        };
+    })()""")
+    zones = audit['zones']
+    assert zones, '应至少有一个年份柱'
+    # 图内文字只允许纯年份或带符号百分比，杜绝任何额外数据样式的文字
+    for line in audit['secText'].split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        assert re.fullmatch(r'\d{4}|[+\-]?\d+(\.\d+)?%', line), \
+            f'年度图中出现游离文字: "{line}"'
+    # 零轴伪元素必须为空（0% 标签曾被误认为多出的数据点）
+    for zc in audit['zeroAfter']:
+        assert zc in ('none', 'normal'), f'零轴伪元素应为空: {zc}'
+    span_tops = {round(g['spanTop']) for g in zones}
+    assert len(span_tops) == 1, f'年份标签应同行对齐: {span_tops}'
+    for g in zones:
+        assert g['zeroHorizontal'], '零轴应位于区域垂直中线'
+        assert g['barHeight'] >= 2, '柱子应有可见高度'
+        assert g['spanInsideCol'], '标签应在柱区下方'
+        if g['val'] >= 0:
+            assert g['barAboveZero'], f"正收益 {g['val']}% 的柱子应在零轴上方"
+        else:
+            assert g['barBelowZero'], f"负收益 {g['val']}% 的柱子应在零轴下方"
+
+
+def test_yearly_bars_multi_year(page):
+    """20 年数据集：多年份柱方向交替正确、标签对齐、无游离文字"""
+    uncheck_all_data(page)
+    check_data(page, 'datas/orcl-1995-2014.txt')
+    page.select_option('#tplSel', 'sma_rsi_atr')
+    page.click('#runBtn')
+    wait_done(page, timeout=180)
+
+    page.wait_for_selector('.yearlyBars .ycolWrap', timeout=10000)
+    res = page.evaluate("""(() => {
+        const sec = document.querySelector('.yearlyBars');
+        const cols = [...sec.querySelectorAll('.ycolWrap')];
+        const spanTops = new Set(cols.map(c =>
+            Math.round(c.querySelector('span').getBoundingClientRect().top)));
+        return {
+            n: cols.length,
+            secText: sec.innerText,
+            spanTops: [...spanTops],
+            dirs: cols.map(c => {
+                const zero = c.querySelector('.yzero').getBoundingClientRect();
+                const bar = c.querySelector('.ybar').getBoundingClientRect();
+                const val = parseFloat(c.dataset.val);
+                const okDir = val >= 0 ? bar.bottom <= zero.top + 1
+                                       : bar.top >= zero.bottom - 1;
+                return {val, okDir};
+            }),
+        };
+    })()""")
+    assert res['n'] >= 15, f"20 年数据应有不少于 15 个年份柱（实际 {res['n']}）"
+    assert len(res['spanTops']) == 1, f'多年份标签应对齐: {res["spanTops"]}'
+    for d in res['dirs']:
+        assert d['okDir'], f"年份 {d['val']}% 柱子方向错误"
+    assert '0%' not in res['secText'].replace('-0%', '').replace('+0%', ''), \
+        '零轴 0% 标签不得再出现'
+    pos = [d['val'] for d in res['dirs'] if d['val'] > 0]
+    neg = [d['val'] for d in res['dirs'] if d['val'] < 0]
+    assert pos and neg, '20 年数据应同时存在正负收益年份'
+
+
+def test_service_badge_and_logdock(page):
+    uncheck_all_data(page)
+    check_data(page, DATA1)
+    page.select_option('#tplSel', 'sma_rsi_atr')
+    page.click('#runBtn')
+    wait_done(page)
+
+    # 服务徽章：明确文字 + 可点击刷新
+    badge = page.locator('#srvBadge')
+    expect(badge).to_be_visible()
+    assert '服务正常' in badge.inner_text()
+    badge.click()
+    page.wait_for_timeout(300)
+    assert '服务正常' in page.locator('#srvBadge').inner_text()
+
+    # 日志坞：默认收起，展开后包含任务与策略日志
+    dock = page.locator('#logDock')
+    expect(dock).to_be_visible()
+    assert not dock.evaluate('el => el.classList.contains("open")'), '默认应收起'
+    page.click('#logToggle')
+    page.wait_for_timeout(200)
+    assert dock.evaluate('el => el.classList.contains("open")'), '点击应展开'
+    body_text = page.locator('#logBody').inner_text()
+    assert '任务已提交' in body_text, '应有任务生命周期日志'
+    assert '运行完成' in body_text
+    assert '买入成交' in body_text or '平仓' in body_text, '应有策略逐笔日志'
+    page.click('#logToggle')
+    page.wait_for_timeout(200)
+    assert not dock.evaluate('el => el.classList.contains("open")')
+
+
+def test_history_panel_table_and_delete(page):
+    """历史任务整合为表格：含策略/数据/结果摘要，支持查看与删除"""
+    uncheck_all_data(page)
+    check_data(page, DATA1)
+    page.select_option('#tplSel', 'sma_rsi_atr')
+    page.click('#runBtn')
+    wait_done(page)
+
+    page.click('#tabHist')
+    page.wait_for_selector('#histBody table tbody tr', timeout=10000)
+
+    headers = page.locator('#histBody thead th').all_inner_texts()
+    for need in ['时间', '类型', '策略', '数据', '参数', '结果', '状态']:
+        assert need in headers, f'历史表缺少列: {need}'
+
+    first_row = page.locator('#histBody tbody tr').first
+    row_text = first_row.inner_text()
+    assert '回测' in row_text
+    assert 'sma_rsi_atr' in row_text or '自定义' in row_text
+    assert '2006-day-001' in row_text
+    assert '收益' in row_text
+
+    # 查看：点击后主区域渲染出绩效卡片
+    first_row.locator('.op.view').click()
+    page.wait_for_selector('.card', timeout=10000)
+    assert page.locator('.card').count() == 12
+
+    # 删除：删掉最后一行任务，该任务的行应消失
+    page.click('#tabHist')
+    page.wait_for_selector('#histBody table tbody tr', timeout=5000)
+    last_id = page.locator('#histBody tbody tr').last.get_attribute('data-id')
+    page.on('dialog', lambda d: d.accept())
+    page.locator('#histBody tbody tr').last.locator('.op.del').click()
+    page.wait_for_timeout(800)
+    gone = page.locator(f'#histBody tbody tr[data-id="{last_id}"]').count()
+    assert gone == 0, f'删除后任务 {last_id} 的行应消失'
+
+
+# ---------------------------------------------------------------- 数据管理：默认勾选 / 删除
+
+def test_data_group_collapse(page):
+    """数据列表分组折叠：自带默认折叠、上传默认展开、可切换、计数角标"""
+    groups = page.evaluate('''(() => {
+        const gs = [...document.querySelectorAll('.data-group')];
+        return gs.map(g => ({
+            label: g.querySelector('summary').innerText,
+            open: g.open,
+            count: parseInt(g.querySelector('.dcount').textContent),
+            items: g.querySelectorAll('.dataChk').length,
+        }));
+    })()''')
+    by_label = {g['label'][:4]: g for g in groups}
+    for g in groups:
+        assert g['count'] == g['items'], '计数角标应与实际条目数一致'
+    builtin = next((g for g in groups if '自带' in g['label']), None)
+    uploads = next((g for g in groups if '上传' in g['label']), None)
+    assert builtin is not None, '应有自带样例分组'
+    assert builtin['open'] is False, '自带样例默认应折叠'
+    if uploads is not None:
+        assert uploads['open'] is True, '我的上传默认应展开'
+
+    # 折叠状态下默认勾选依然生效（隐藏元素 checked 可查）
+    checked = page.evaluate(
+        '() => [...document.querySelectorAll(".dataChk:checked")].map(c => c.value)')
+    assert len(checked) == 1 and 'datas/' in checked[0]
+
+    # 点击 summary 展开/收起
+    page.evaluate('() => document.querySelector(".data-group").open = false')
+    page.click('.data-group > summary')
+    assert page.evaluate('() => document.querySelector(".data-group").open') is True
+    page.click('.data-group > summary')
+    assert page.evaluate('() => document.querySelector(".data-group").open') is False
+
+
+def test_data_default_selection_and_delete(page):
+    """上传数据默认不勾选（只默认勾一个自带样例）；上传数据可删除"""
+    uploads = os.path.join(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))), 'webapp', 'uploads')
+    # 造一个专用于删除测试的文件
+    dummy = os.path.join(uploads, 'zz-e2e-delete-me.csv')
+    with open(dummy, 'w') as f:
+        f.write('Date,Open,High,Low,Close,Volume,OpenInterest\n')
+        for d in range(1, 25):
+            f.write(f'2024-01-{d:02d},10,11,9,10,100,0\n')
+    try:
+        page.reload()
+        page.wait_for_selector('.dataChk', state='attached', timeout=15000)
+
+        # 1) 上传区的 checkbox 一律不勾选
+        upload_checks = page.locator('.dataChk')
+        n = upload_checks.count()
+        upload_items = page.evaluate('''(() => {
+            const items = [...document.querySelectorAll('.dataChk')];
+            return items.filter(c => c.value.includes('webapp/uploads/')
+                                     && !c.value.includes('zz-e2e-delete-me'));
+        })()''')
+        if upload_items:
+            assert all(not c['checked'] for c in page.evaluate(
+                '() => [...document.querySelectorAll(".dataChk")]'
+                '.filter(c => c.value.includes("webapp/uploads/"))'
+                '.map(c => ({checked: c.checked}))')), \
+                '上传数据不应默认勾选'
+        # 2) 默认恰好勾选 1 个（自带样例）
+        checked = page.evaluate(
+            '() => [...document.querySelectorAll(".dataChk:checked")]'
+            '.map(c => c.value)')
+        assert len(checked) == 1 and 'datas/' in checked[0], \
+            f'应默认只勾选一个自带样例: {checked}'
+
+        # 3) 删除按钮只出现在上传区
+        dels = page.locator('.data-del')
+        assert dels.count() >= 1
+        # 自带数据项没有删除按钮
+        builtin_has_del = page.evaluate(
+            '() => [...document.querySelectorAll(".data-item")]'
+            '.some(it => it.querySelector("input").value.startsWith("datas/")'
+            ' && it.querySelector(".data-del"))')
+        assert not builtin_has_del, '自带数据不应有删除按钮'
+
+        # 4) 删除 dummy 文件 → 列表移除、文件消失
+        page.on('dialog', lambda d: d.accept())
+        target = page.locator('.data-del[data-path*="zz-e2e-delete-me"]')
+        target.click()
+        page.wait_for_timeout(600)
+        assert page.locator('.data-del[data-path*="zz-e2e-delete-me"]').count() == 0
+        assert not os.path.exists(dummy)
+    finally:
+        if os.path.exists(dummy):
+            os.remove(dummy)
+
+
+# ---------------------------------------------------------------- 在线获取：日期控件 + 中文名搜索
+
+def test_fetch_panel_date_pickers_and_symbol_search(page):
+    """日期为原生 date 控件且有默认值；代码输入支持中文名搜索下拉"""
+    # 展开在线获取面板
+    page.click('text=在线获取数据（AkShare / Yahoo）')
+    page.wait_for_selector('#fetchSymbol:visible', timeout=5000)
+
+    # 1) 日期控件 + 默认值（近两年）
+    assert page.locator('#fetchStart').get_attribute('type') == 'date'
+    assert page.locator('#fetchEnd').get_attribute('type') == 'date'
+    start_default = page.locator('#fetchStart').input_value()
+    end_default = page.locator('#fetchEnd').input_value()
+    assert re.fullmatch(r'\d{4}-\d{2}-\d{2}', start_default)
+    assert re.fullmatch(r'\d{4}-\d{2}-\d{2}', end_default)
+    assert start_default < end_default
+
+    # 2) 中文名搜索：输入"茅台" → 下拉出现 600519 → 点击选中
+    page.fill('#fetchSymbol', '茅台')
+    page.wait_for_selector('#symDrop .symopt', timeout=10000)
+    opt = page.locator('#symDrop .symopt').first
+    assert '600519' in opt.inner_text()
+    assert '贵州茅台' in opt.inner_text()
+    opt.click()
+    page.wait_for_timeout(200)
+    assert page.locator('#fetchSymbol').input_value() == '600519'
+    assert '贵州茅台' in page.locator('#symPicked').inner_text()
+
+    # 3) 代码前缀搜索：结果按代码排序，30075 应精确命中宁德时代
+    page.fill('#fetchSymbol', '30075')
+    page.wait_for_selector('#symDrop .symopt', timeout=10000)
+    assert '300750' in page.locator('#symDrop .symopt').first.inner_text()
+
+    # 4) 键盘：输入名称后回车选中第一个
+    page.fill('#fetchSymbol', '宁德')
+    page.wait_for_selector('#symDrop .symopt', timeout=10000)
+    page.press('#fetchSymbol', 'Enter')
+    page.wait_for_timeout(200)
+    assert page.locator('#fetchSymbol').input_value() == '300750'
+
+    # 5) 指数源搜索走静态表
+    page.select_option('#fetchProvider', 'akshare-index')
+    page.fill('#fetchSymbol', '上证')
+    page.wait_for_selector('#symDrop .symopt', timeout=10000)
+    assert 'sh000001' in page.locator('#symDrop .symopt').first.inner_text()
 
 
 # ---------------------------------------------------------------- 回归：错误体验

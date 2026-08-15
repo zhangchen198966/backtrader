@@ -34,6 +34,41 @@ def test_terms_api():
         assert len(terms[must]) >= 8  # 解释不是空壳
 
 
+def test_terms_cover_param_labels_and_config():
+    """术语表需覆盖全部策略参数标签与配置区术语（页面披露完整性）"""
+    r = client.get('/api/terms')
+    terms = r.json()['terms']
+    # 模板参数标签（来自 templates.py 的 label 字段）
+    from webapp.templates import TEMPLATES
+    import re as _re
+    param_labels = set()
+    for t in TEMPLATES:
+        for meta in t['params']:
+            param_labels.add(meta['label'])
+    # 配置区/交易明细静态标签
+    html = open(INDEX, encoding='utf-8').read()
+    static_labels = set(_re.findall(r'class="tlabel">([^<]+)<', html))
+    # 网格模式在 span 里
+    static_labels |= set(_re.findall(r'<span class="tlabel">([^<]+)</span>', html))
+
+    glossary_keys = set(terms)
+    missing_terms = []
+    for label in param_labels | static_labels:
+        # 标签至少能命中术语表中的某个词条（自身或其中包含的子串）
+        hit = label in glossary_keys or any(
+            k in label for k in glossary_keys if len(k) >= 2)
+        if not hit:
+            missing_terms.append(label)
+    assert not missing_terms, f'这些标签完全没有术语解释: {missing_terms}'
+
+    # 参数级概念必须有专门解释（而不是只蹭 RSI/ATR 的子串）
+    for must in ('RSI周期', 'RSI下限', 'ATR周期', 'ATR止损倍数', '布林周期',
+                 '标准差倍数', '止损幅度', '快EMA', '慢EMA', '信号EMA',
+                 '手数', '开仓价', '平仓价', '持仓bar', '初始现金',
+                 'Sizer 类型', '网格模式', '前复权', '策略-基准', '盈/亏笔数'):
+        assert must in terms, f'术语表缺少参数/配置术语: {must}'
+
+
 def test_terms_used_by_frontend_exist_in_glossary():
     """前端 T('...') 引用的术语必须都在术语表中（tips 才能弹出来）"""
     html = open(INDEX, encoding='utf-8').read()
