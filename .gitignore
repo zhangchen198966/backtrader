@@ -69,3 +69,11 @@ samples2/
 datas/*.py
 
 .idea/
+
+# bt-lab 运行时产物
+.venv/
+.DS_Store
+.pytest_cache/
+webapp/tasks/
+webapp/uploads/
+demo_backtest.png

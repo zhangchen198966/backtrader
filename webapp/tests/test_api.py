@@ -1,0 +1,120 @@
+# -*- coding: utf-8 -*-
+"""API 与静态资源测试：术语表 / 静态资源本地化 / 前端引用完整性"""
+import os
+import re
+
+import httpx
+from fastapi.testclient import TestClient
+
+from webapp.glossary import GLOSSARY
+from webapp.server import app
+from webapp.tests.conftest import REPO_ROOT
+
+client = TestClient(app)
+
+INDEX = os.path.join(REPO_ROOT, 'webapp', 'static', 'index.html')
+BT_LAB_JS = os.path.join(REPO_ROOT, 'webapp', 'static', 'bt-lab.js')
+ECHARTS = os.path.join(REPO_ROOT, 'webapp', 'static', 'vendor', 'echarts.min.js')
+
+
+def test_index_served():
+    r = client.get('/')
+    assert r.status_code == 200
+    assert 'Backtrader 回测实验室' in r.text
+
+
+def test_terms_api():
+    """目标3：术语表 API 返回且包含核心量化名词"""
+    r = client.get('/api/terms')
+    assert r.status_code == 200
+    terms = r.json()['terms']
+    for must in ('夏普比率', '最大回撤', 'SQN', '年化收益率', '胜率', '买入持有',
+                 'RSI', 'ATR', 'MACD', '布林带', '网格优化', '权益曲线'):
+        assert must in terms, f'术语表缺少: {must}'
+        assert len(terms[must]) >= 8  # 解释不是空壳
+
+
+def test_terms_used_by_frontend_exist_in_glossary():
+    """前端 T('...') 引用的术语必须都在术语表中（tips 才能弹出来）"""
+    html = open(INDEX, encoding='utf-8').read()
+    used = set(re.findall(r"\bT\('([^']+)'\)", html))
+    assert used, '前端没有使用 T() 术语包装'
+    missing = used - set(GLOSSARY)
+    assert not missing, f'前端引用但术语表缺失: {missing}'
+
+
+def test_static_assets_local_no_cdn():
+    """目标2：ECharts 本地化，页面无任何 CDN 外链（离线可用）"""
+    r1 = client.get('/static/bt-lab.js')
+    r2 = client.get('/static/vendor/echarts.min.js')
+    assert r1.status_code == 200 and len(r1.content) > 5000
+    assert r2.status_code == 200 and len(r2.content) > 500000  # 完整 echarts
+    html = open(INDEX, encoding='utf-8').read()
+    assert '/static/vendor/echarts.min.js' in html
+    assert '/static/bt-lab.js' in html
+    assert not re.search(r'src=["\']https?://', html), '不允许外链脚本'
+    assert not re.search(r'href=["\']https?://', html), '不允许外链样式'
+
+
+def test_theme_css_in_index():
+    """目标1：亮/暗双主题 CSS 存在且由 data-theme 切换"""
+    html = open(INDEX, encoding='utf-8').read()
+    assert 'html[data-theme="light"]' in html
+    assert 'html[data-theme="dark"]' in html or ':root{' in html
+    assert 'id="themeBtn"' in html
+    js = open(BT_LAB_JS, encoding='utf-8').read()
+    assert 'data-theme' in js and 'btlab-theme' in js
+
+
+def test_editor_highlight_dom_present():
+    """目标5：高亮编辑器结构（pre 叠加透明 textarea）与配色类存在"""
+    html = open(INDEX, encoding='utf-8').read()
+    assert 'id="hl"' in html and 'id="editor"' in html
+    assert 'caret-color' in html  # 透明文字 + 可见光标
+    for cls in ('.tk-kw', '.tk-str', '.tk-num', '.tk-com', '.tk-bi'):
+        assert cls in html, f'缺少高亮配色 {cls}'
+
+
+def test_term_tip_dom_present():
+    """目标3：tips 浮层结构存在"""
+    html = open(INDEX, encoding='utf-8').read()
+    assert 'id="tipbox"' in html
+    assert '.term' in html  # 术语样式与 span.term 渲染约定
+
+
+def test_datas_and_templates_api():
+    r = client.get('/api/datas')
+    assert r.status_code == 200
+    data = r.json()
+    assert data['builtin'], '应列出仓库自带数据'
+    r = client.get('/api/strategy/templates')
+    assert r.status_code == 200
+    tpls = r.json()['templates']
+    assert {t['id'] for t in tpls} >= {'sma_cross', 'sma_rsi_atr',
+                                       'bbands_reversal', 'macd_signal'}
+
+
+def test_run_validation():
+    """run 参数校验：mode / 数据缺失 → 400，不产生任务"""
+    r = client.post('/api/run', json={'mode': 'bad'})
+    assert r.status_code == 400
+    r = client.post('/api/run', json={'mode': 'backtest', 'data': {}})
+    assert r.status_code == 400
+    r = client.post('/api/run', json={'mode': 'backtest',
+                                      'data': {'path': []}})
+    assert r.status_code == 400
+    # 合法请求（多数据 list 形式）能拿到 task_id（排队但不真正等待执行）
+    r = client.post('/api/run', json={
+        'mode': 'backtest',
+        'data': {'path': ['datas/2006-day-001.txt']},
+        'strategy': {'source': 'template', 'template_id': 'sma_cross',
+                     'params': {'fast': 10, 'slow': 30}},
+        'broker': {'cash': 100000},
+        'sizer': {'type': 'percent', 'value': 90}})
+    assert r.status_code == 200
+    assert 'task_id' in r.json()
+
+
+def test_task_not_found():
+    r = client.get('/api/task/not-exist-id')
+    assert r.status_code == 404
