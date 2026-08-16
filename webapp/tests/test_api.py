@@ -173,13 +173,13 @@ def test_market_apis():
     r = client.get('/api/strategy/market')
     assert r.status_code == 200
     items = r.json()['market']
-    assert len(items) >= 10
+    assert len(items) >= 14
     r = client.get('/api/strategy/market', params={'q': '止损'})
     assert any('mk-stoptrail' == m['id'] for m in r.json()['market'])
     # provider 过滤
     r = client.get('/api/strategy/market', params={'provider': 'community'})
     comm = r.json()['market']
-    assert len(comm) == 3 and all(m['provider'] == 'community' for m in comm)
+    assert len(comm) == 7 and all(m['provider'] == 'community' for m in comm)
     r = client.get('/api/strategy/market', params={'provider': 'official'})
     assert all(m['provider'] == 'official' for m in r.json()['market'])
 

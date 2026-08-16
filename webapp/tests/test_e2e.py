@@ -666,19 +666,21 @@ def test_market_overlay_and_import(page):
     # 全部：官方 7 + 第三方 3
     page.wait_for_selector('.mkt-card', timeout=15000)
     all_cards = page.locator('.mkt-card').count()
-    assert all_cards >= 10, f'全部应≥10条（实际{all_cards}）'
+    assert all_cards >= 14, f'全部应≥14条（实际{all_cards}）'
     # 官方徽章与第三方徽章同时存在
     assert page.locator('.mc-badge.official').count() >= 5
-    assert page.locator('.mc-badge.community').count() >= 3
+    assert page.locator('.mc-badge.community').count() >= 7
 
     # 分类过滤：第三方社区 = 2 张卡
     page.locator('.mo-tab[data-cat="community"]').click()
     page.wait_for_timeout(400)
     n_comm = page.locator('.mkt-card').count()
-    assert n_comm == 3, f'第三方应有 3 条（实际{n_comm}）'
+    assert n_comm == 7, f'第三方应有 7 条（实际{n_comm}）'
     grid_text = page.locator('#mktGrid').inner_text()
-    assert 'jasgin/backtrader-backtests' in grid_text
-    assert 'ilahuerta-IA' in grid_text
+    for repo in ['jasgin/backtrader-backtests', 'ilahuerta-IA',
+                 'jrothschild33/learn_backtrader', 'Adonis2115/Backtesting',
+                 '0xRobWatson']:
+        assert repo in grid_text, f'缺少来源仓库 {repo}'
 
     # 搜索
     page.fill('#mktSearch', '布林')

@@ -80,6 +80,27 @@ MARKET = [
      'tags': '拉回 波动率 多周期 风控', 'provider': 'community',
      'repo': 'ilahuerta-IA/backtrader-pullback-window-xauusd',
      'path': 'src/strategy/sunrise_ogle_xauusd.py', 'class': 'SunriseOgle'},
+    {'id': 'mk-lesson3', 'name': '官方教程实战策略（中文教程库）',
+     'desc': '来自 2247★ 中文教程库《learn_backtrader》（量化投资与机器学习笔记）的'
+             '指标组合示例，适合配合教程学习策略构建。',
+     'tags': '中文 教程 入门', 'provider': 'community',
+     'repo': 'jrothschild33/learn_backtrader',
+     'path': 'Lesson3.py', 'class': 'MyStrategy'},
+    {'id': 'mk-golden-cross', 'name': '金叉策略（可调参数）',
+     'desc': '第三方社区策略：经典均线金叉/死叉，4 个可调参数，适合作为参数优化练习的起点。',
+     'tags': '均线 金叉 入门', 'provider': 'community',
+     'repo': 'Adonis2115/Backtesting',
+     'path': 'strategies/goldenCross.py', 'class': 'GoldenCross'},
+    {'id': 'mk-buy-dip', 'name': '逢跌买入策略',
+     'desc': '第三方社区策略：价格回调超过阈值时买入博反弹的均值回归思路。',
+     'tags': '均值回归 回调', 'provider': 'community',
+     'repo': 'Adonis2115/Backtesting',
+     'path': 'strategies/dip.py', 'class': 'BuyDip'},
+    {'id': 'mk-ma-cross-rw', 'name': '双均线交叉（教学实现）',
+     'desc': '第三方社区策略：结构清晰的双均线交叉教学实现，适合阅读源码学习 next() 写法。',
+     'tags': '均线 教学', 'provider': 'community',
+     'repo': '0xRobWatson/Quant-Trading-Strategy-Backtesting-Framework',
+     'path': 'MA%20cross.py', 'class': 'MaCrossStrategy'},
 ]
 
 
@@ -151,26 +172,38 @@ def _seg(source_code, lines, node):
         '\n'.join(lines[node.lineno - 1:node.end_lineno])
 
 
-def _literal_like(node):
-    """模块级常量赋值的右值判定（排除会在导入时产生副作用的 Call 等）"""
-    if isinstance(node, (ast.Constant, ast.List, ast.Tuple, ast.Dict, ast.Set)):
-        return True
-    if isinstance(node, (ast.Name, ast.Attribute)):
-        return True
-    if isinstance(node, ast.UnaryOp):
-        return _literal_like(node.operand)
-    if isinstance(node, ast.BinOp):
-        return _literal_like(node.left) and _literal_like(node.right)
+def _import_matches(node, module):
+    """该 import 语句是否引入了指定模块"""
+    if isinstance(node, ast.Import):
+        return any(a.name == module or a.name.startswith(module + '.')
+                   for a in node.names)
+    if isinstance(node, ast.ImportFrom):
+        return node.module == module or \
+            (node.module or '').startswith(module + '.')
     return False
 
 
-def extract_strategy(source_code, class_name):
-    """抽取可独立运行的策略代码。
+def _top_level_names(node):
+    """顶层语句定义的名字（Assign/函数/类）"""
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return {node.name}
+    if isinstance(node, ast.Assign):
+        return {t.id for t in node.targets if isinstance(t, ast.Name)}
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+        return {node.target.id}
+    return set()
 
-    收集模块级：imports、函数/类定义（含目标类继承链）、字面量常量赋值
-    （策略类可能引用模块常量如 ENABLE_LONG_TRADES）；
-    排除导入时会执行的语句（对象创建、if __main__ 等）。
+
+def extract_strategy(source_code, class_name):
+    """抽取可独立运行的策略代码（迭代式依赖解析）。
+
+    从 imports + 目标类（含文件内基类）出发反复校验：
+      - ModuleNotFoundError → 剪掉引入该第三方模块的 import（教程文件顶部
+        常有 tushare/empyrical 等数据拉取依赖，策略类本身并不需要）
+      - NameError → 从文件顶层补全该名字的定义语句（常量/函数/类）
+    直到可执行；不可满足则抛 MarketError。
     """
+    import re as _re
     try:
         tree = ast.parse(source_code)
     except SyntaxError as e:
@@ -181,31 +214,79 @@ def extract_strategy(source_code, class_name):
         raise MarketError(f'源码中未找到策略类 {class_name}')
 
     lines = source_code.split('\n')
-    parts = ['"""从模板市场导入"""']
-    for node in tree.body:
-        seg = None
-        if isinstance(node, (ast.Import, ast.ImportFrom,
-                             ast.FunctionDef, ast.AsyncFunctionDef,
-                             ast.ClassDef)):
-            seg = _seg(source_code, lines, node)
-        elif isinstance(node, ast.Assign) and \
-                all(isinstance(t, ast.Name) for t in node.targets) and \
-                _literal_like(node.value):
-            seg = _seg(source_code, lines, node)
-        elif isinstance(node, ast.AnnAssign) and \
-                isinstance(node.target, ast.Name) and \
-                node.value is not None and _literal_like(node.value):
-            seg = _seg(source_code, lines, node)
-        if seg:
-            parts.append(seg)
+    imports = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
+    others = [n for n in tree.body
+              if not isinstance(n, (ast.Import, ast.ImportFrom))]
 
-    code = '\n\n'.join(parts) + '\n'
-    # 二次校验：抽取结果必须可执行且包含 Strategy 子类
-    try:
-        validate_strategy_code(code)
-    except TemplateError as e:
-        raise MarketError(f'抽取的策略类不完整（可能依赖文件内其他函数）: {e}')
-    return code
+    # 预置安全语句：函数/类定义（不执行）与字面量常量赋值（无副作用）
+    def _literal_like(v):
+        if isinstance(v, (ast.Constant, ast.List, ast.Tuple, ast.Dict, ast.Set,
+                          ast.Name, ast.Attribute)):
+            return True
+        if isinstance(v, ast.UnaryOp):
+            return _literal_like(v.operand)
+        if isinstance(v, ast.BinOp):
+            return _literal_like(v.left) and _literal_like(v.right)
+        return False
+
+    safe = [n for n in others
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            or (isinstance(n, ast.Assign)
+                and all(isinstance(t, ast.Name) for t in n.targets)
+                and _literal_like(n.value))]
+
+    def _initial(segs):
+        parts = ['"""从模板市场导入"""']
+        parts += [_seg(source_code, lines, n) for n in imports]
+        parts += [_seg(source_code, lines, n) for n in segs]
+        return parts, set(id(n) for n in imports) | set(id(n) for n in segs)
+
+    # 两阶段：先带安全预置（函数/类/字面量常量），失败则回退极简模式
+    # （预置可能引入教程占位类等坏语句，如 lines = (xxx,xxx)）
+    phases = [safe, chain]
+    last_err = None
+    for phase in phases:
+      try:
+        parts, used = _initial(phase)
+        for _round in range(60):
+            code = '\n\n'.join(p for p in parts if p) + '\n'
+            try:
+                validate_strategy_code(code)
+                return code
+            except TemplateError as e:
+                err = str(e)
+                m = _re.search(r"No module named '([^']+)'", err)
+                if m:
+                    mod = m.group(1).split('.')[0]
+                    dropped = False
+                    for n in list(imports):
+                        if id(n) in used and _import_matches(n, mod):
+                            seg = _seg(source_code, lines, n)
+                            parts = [p for p in parts if p != seg]
+                            used.discard(id(n))
+                            dropped = True
+                    if dropped:
+                        continue
+                    raise MarketError(f'策略依赖不可用模块 {mod}')
+                m2 = _re.search(r"name '([^']+)' is not defined", err)
+                if m2:
+                    name = m2.group(1)
+                    found = next((n for n in others
+                                  if id(n) not in used and name in _top_level_names(n)),
+                                 None)
+                    if found is not None:
+                        used.add(id(found))
+                        seg = _seg(source_code, lines, found)
+                        n_imports_used = sum(1 for n in imports if id(n) in used)
+                        parts.insert(min(1 + n_imports_used, len(parts)), seg)
+                        continue
+                    raise MarketError(f'策略依赖文件内未知的名字 {name}')
+                raise MarketError(f'抽取的策略类不完整: {err[-300:]}')
+        last_err = MarketError('依赖解析轮次耗尽')
+      except MarketError as e:
+        last_err = e
+        continue
+    raise last_err or MarketError('抽取失败')
 
 
 # ---------------------------------------------------------------- 导入流程
