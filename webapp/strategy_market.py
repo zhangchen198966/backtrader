@@ -34,46 +34,60 @@ class MarketError(Exception):
 # 人工甄选目录（repo/path 定位源码，class 指定要导入的策略类）
 # 甄别标准：AST 抽取后可独立 exec、真实回测通过（lrsi/multitimeframe 等样本因
 # 引用当前库不存在的指标或需要多数据源已被剔除）
+# provider: official=官方仓库 samples；community=第三方社区仓库（同样经过回测验证）
 MARKET = [
     {'id': 'mk-macd-settings', 'name': 'MACD 可调参数策略',
      'desc': '官方示例：MACD 指标参数（快/慢/信号）全部可调，适合参数优化练习。',
-     'tags': 'MACD 动量 官方samples', 'repo': 'mementum/backtrader',
+     'tags': 'MACD 动量', 'provider': 'official', 'repo': 'mementum/backtrader',
      'path': 'samples/macd-settings/macd-settings.py', 'class': 'TheStrategy'},
     {'id': 'mk-psar', 'name': '抛物线 SAR 趋势跟踪',
      'desc': '官方示例：使用 ParabolicSAR 指标的趋势策略，含绘图设置。',
-     'tags': 'SAR 趋势 官方samples', 'repo': 'mementum/backtrader',
+     'tags': 'SAR 趋势', 'provider': 'official', 'repo': 'mementum/backtrader',
      'path': 'samples/psar/psar.py', 'class': 'St'},
     {'id': 'mk-stoptrail', 'name': '移动止损（StopTrail）',
      'desc': '官方示例：限价单入场 + StopTrail 移动止损单离场。',
-     'tags': '止损 风控 官方samples', 'repo': 'mementum/backtrader',
+     'tags': '止损 风控', 'provider': 'official', 'repo': 'mementum/backtrader',
      'path': 'samples/stoptrail/trail.py', 'class': 'St'},
     {'id': 'mk-kselrsi', 'name': 'K线信号 + RSI 过滤',
      'desc': '官方示例：K线形态信号与 RSI 结合的入场策略。',
-     'tags': 'K线形态 RSI 官方samples', 'repo': 'mementum/backtrader',
+     'tags': 'K线形态 RSI', 'provider': 'official', 'repo': 'mementum/backtrader',
      'path': 'samples/kselrsi/ksignal.py', 'class': 'TheStrategy'},
     {'id': 'mk-order-target', 'name': 'order_target 仓位管理',
      'desc': '官方示例：演示 order_target_size/value 系列按目标仓位下单的用法。',
-     'tags': '仓位管理 官方samples', 'repo': 'mementum/backtrader',
+     'tags': '仓位管理', 'provider': 'official', 'repo': 'mementum/backtrader',
      'path': 'samples/order_target/order_target.py', 'class': 'TheStrategy'},
     {'id': 'mk-bracket', 'name': 'Bracket 组合单（止盈+止损）',
      'desc': '官方示例：buy_bracket 一单三腿（主单+止盈+止损）的标准用法。',
-     'tags': '组合单 风控 官方samples', 'repo': 'mementum/backtrader',
+     'tags': '组合单 风控', 'provider': 'official', 'repo': 'mementum/backtrader',
      'path': 'samples/bracket/bracket.py', 'class': 'St'},
     {'id': 'mk-optimization', 'name': '官方参数优化示例',
      'desc': '官方示例：带多参数的均线策略，专为参数优化设计（配合网格模式使用）。',
-     'tags': '优化 均线 官方samples', 'repo': 'mementum/backtrader',
+     'tags': '优化 均线', 'provider': 'official', 'repo': 'mementum/backtrader',
      'path': 'samples/optimization/optimization.py', 'class': 'OptimizeStrategy'},
+    {'id': 'mk-bb-adx', 'name': '布林带 + ADX 趋势过滤',
+     'desc': '第三方社区策略：布林带突破入场，ADX 过滤弱趋势行情，含完整交易日志输出。',
+     'tags': '布林带 ADX 趋势', 'provider': 'community',
+     'repo': 'jasgin/backtrader-backtests',
+     'path': 'BollBand%20and%20ADX/BB_ADX.py', 'class': 'BBADX'},
+    {'id': 'mk-stoch-sr', 'name': '随机指标 + 支撑阻力位',
+     'desc': '第三方社区策略：Stochastic 指标结合支撑/阻力位判断的超买超卖反转策略。',
+     'tags': 'Stochastic 支撑阻力 反转', 'provider': 'community',
+     'repo': 'jasgin/backtrader-backtests',
+     'path': 'StochasticSR/Stochastic_SR_Backtest.py', 'class': 'StochasticSR'},
 ]
 
 
-def catalog(keyword=None):
-    """目录（可按关键词过滤 name/desc/tags）"""
+def catalog(keyword=None, provider=None):
+    """目录（可按关键词过滤 name/desc/tags，按来源过滤 provider）"""
     kw = (keyword or '').strip().lower()
-    if not kw:
-        return list(MARKET)
-    return [m for m in MARKET
-            if kw in m['name'].lower() or kw in m['desc'].lower()
-            or kw in m['tags'].lower()]
+    out = list(MARKET)
+    if provider in ('official', 'community'):
+        out = [m for m in out if m.get('provider') == provider]
+    if kw:
+        out = [m for m in out
+               if kw in m['name'].lower() or kw in m['desc'].lower()
+               or kw in m['tags'].lower()]
+    return out
 
 
 def find_market(mid):

@@ -340,9 +340,9 @@ def api_delete_template(tid: str):
 
 
 @app.get('/api/strategy/market')
-def api_market(q: str = ''):
-    """在线模板市场目录（关键词过滤）"""
-    return {'market': catalog(q)}
+def api_market(q: str = '', provider: str = ''):
+    """在线模板市场目录（关键词 + 来源过滤）"""
+    return {'market': catalog(q, provider or None)}
 
 
 @app.post('/api/strategy/market/import')

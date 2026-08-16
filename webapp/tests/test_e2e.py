@@ -629,10 +629,12 @@ def test_save_custom_code_as_template(page):
     assert '★ E2E保存模板' in page.locator('#tplSel').inner_text()
     sel_val = page.locator('#tplSel').input_value()
     assert sel_val.startswith('custom-')
-    # 我的模板面板出现该条目（先展开折叠面板，隐藏元素 innerText 为空）
-    open_details(page, '我的模板')
-    page.wait_for_timeout(200)
-    assert 'E2E保存模板' in page.locator('#myTplList').inner_text()
+    # 模板市场 overlay 的「我的模板」分类显示该条目
+    page.click('#marketBtn')
+    page.locator('.mo-tab[data-cat="mine"]').click()
+    page.wait_for_timeout(300)
+    assert 'E2E保存模板' in page.locator('#mktGrid').inner_text()
+    page.keyboard.press('Escape')
 
     # 用保存的模板真实跑一次回测
     uncheck_all_data(page)
@@ -642,34 +644,54 @@ def test_save_custom_code_as_template(page):
     assert page.locator('#errorBox').is_hidden()
     assert page.locator('.card').count() == 12
 
-    # 删除清理（面板已展开）
+    # 删除清理（市场 overlay 的我的模板分类）
+    page.click('#marketBtn')
+    page.locator('.mo-tab[data-cat="mine"]').click()
+    page.wait_for_timeout(300)
     page.on('dialog', lambda d: d.accept())
-    page.locator('#myTplList .mytpl-del').first.click()
+    page.locator('.mytpl-del').first.click()
     page.wait_for_timeout(600)
-    open_details(page, '我的模板')
-    assert 'E2E保存模板' not in page.locator('#myTplList').inner_text()
+    assert 'E2E保存模板' not in page.locator('#mktGrid').inner_text()
+    page.keyboard.press('Escape')
 
 
-def test_market_search_and_import(page):
-    """目标2：模板市场目录/搜索/在线导入，导入后可运行"""
-    page.click('text=模板市场 · 在线策略库（搜索并导入）')
-    page.wait_for_selector('.mkt-item', timeout=15000)
-    n_all = page.locator('.mkt-item').count()
-    assert n_all >= 7, f'市场目录应≥7条（实际{n_all}）'
+def test_market_overlay_and_import(page):
+    """目标：全屏模板市场——卡片浏览/分类/搜索/在线导入（官方+第三方）"""
+    page.click('#marketBtn')
+    assert page.locator('#marketOverlay').is_visible()
 
-    # 关键词搜索过滤
-    page.fill('#mktSearch', 'MACD')
+    # 全部：官方 7 + 第三方 2
+    page.wait_for_selector('.mkt-card', timeout=15000)
+    all_cards = page.locator('.mkt-card').count()
+    assert all_cards >= 9, f'全部应≥9条（实际{all_cards}）'
+    # 官方徽章与第三方徽章同时存在
+    assert page.locator('.mc-badge.official').count() >= 5
+    assert page.locator('.mc-badge.community').count() >= 2
+
+    # 分类过滤：第三方社区 = 2 张卡
+    page.locator('.mo-tab[data-cat="community"]').click()
+    page.wait_for_timeout(400)
+    assert page.locator('.mkt-card').count() == 2
+    assert 'jasgin/backtrader-backtests' in page.locator('#mktGrid').inner_text()
+
+    # 搜索
+    page.fill('#mktSearch', '布林')
     page.wait_for_timeout(500)
-    names = page.locator('.mkt-item').all_inner_texts()
-    assert len(names) < n_all and any('MACD' in t for t in names)
+    assert page.locator('.mkt-card').count() == 1
     page.fill('#mktSearch', '')
     page.wait_for_timeout(500)
+
+    # ESC 关闭 / 按钮再开
+    page.keyboard.press('Escape')
+    assert page.locator('#marketOverlay').is_hidden()
+    page.click('#marketBtn')
+    assert page.locator('#marketOverlay').is_visible()
 
     # 真实在线导入（网络不可达则跳过，不误报红）
     import httpx
     try:
-        probe = httpx.get('https://cdn.jsdelivr.net/gh/mementum/backtrader@'
-                          'master/samples/stoptrail/trail.py',
+        probe = httpx.get('https://cdn.jsdelivr.net/gh/jasgin/backtrader-backtests'
+                          '@master/StochasticSR/Stochastic_SR_Backtest.py',
                           timeout=8, trust_env=False)
         net_ok = probe.status_code == 200
     except Exception:
@@ -677,11 +699,19 @@ def test_market_search_and_import(page):
     if not net_ok:
         pytest.skip('jsdelivr 不可达，市场在线导入已由离线 mock 测试覆盖')
 
-    page.locator('.mkt-import[data-id="mk-stoptrail"]').click()
-    open_details(page, '我的模板')
-    page.wait_for_selector('#myTplList .mkt-item', timeout=60000)
-    assert '移动止损' in page.locator('#myTplList').inner_text()
-    # 导入后自动选中为当前模板
+    page.locator('.mo-tab[data-cat="community"]').click()
+    page.wait_for_selector('.mkt-card', timeout=10000)
+    page.locator('.mkt-card[data-id="mk-stoch-sr"] .mkt-import').click()
+    page.wait_for_timeout(1500)
+    # 导入成功 → 我的模板分类出现
+    page.locator('.mo-tab[data-cat="mine"]').click()
+    page.wait_for_timeout(400)
+    assert '随机指标' in page.locator('#mktGrid').inner_text()
+
+    # 「使用」：关闭 overlay 并选中模板
+    page.locator('.mytpl-use').first.click()
+    page.wait_for_timeout(300)
+    assert page.locator('#marketOverlay').is_hidden()
     assert page.locator('#tplSel').input_value().startswith('custom-')
 
     # 导入的模板真实回测
@@ -691,10 +721,14 @@ def test_market_search_and_import(page):
     wait_done(page)
     assert page.locator('#errorBox').is_hidden()
 
-    # 清理导入的模板（面板已展开）
+    # 清理
+    page.click('#marketBtn')
+    page.locator('.mo-tab[data-cat="mine"]').click()
+    page.wait_for_timeout(300)
     page.on('dialog', lambda d: d.accept())
-    page.locator('#myTplList .mytpl-del').first.click()
+    page.locator('.mytpl-del').first.click()
     page.wait_for_timeout(500)
+    page.keyboard.press('Escape')
 
 
 # ---------------------------------------------------------------- 在线获取：日期控件 + 中文名搜索

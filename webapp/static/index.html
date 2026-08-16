@@ -100,19 +100,51 @@ select:focus,input:focus{border-color:var(--accent)}
 .tk-num{color:var(--tk-num)}
 .tk-com{color:var(--tk-com);font-style:italic}
 .tk-bi{color:var(--tk-bi)}
+/* 全屏模板市场 */
+#marketBtn{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+  border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;}
+#marketBtn:hover{border-color:var(--accent)}
+#marketOverlay{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.55);
+  display:flex;align-items:center;justify-content:center;padding:24px;}
+#marketOverlay[hidden]{display:none}
+.mo-shell{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  width:min(1200px,96vw);max-height:92vh;display:flex;flex-direction:column;
+  box-shadow:0 24px 80px rgba(0,0,0,.5);}
+.mo-head{display:flex;align-items:center;gap:14px;padding:16px 22px;
+  border-bottom:1px solid var(--line);}
+.mo-head h2{font-size:17px;font-weight:600}
+.mo-head input{max-width:420px}
+.mo-close{background:none;border:1px solid var(--line);color:var(--sub);
+  border-radius:7px;padding:6px 12px;cursor:pointer;margin-left:auto;}
+.mo-close:hover{border-color:var(--red);color:var(--red)}
+.mo-tabs{display:flex;gap:8px;padding:12px 22px 0}
+.mo-tab{background:var(--panel2);border:1px solid var(--line);color:var(--sub);
+  border-radius:18px;padding:5px 16px;font-size:13px;cursor:pointer;}
+.mo-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.mo-hint{padding:8px 22px 0;color:var(--sub);font-size:12px}
+#mktGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));
+  gap:14px;padding:16px 22px 22px;overflow-y:auto;}
+.mkt-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+  padding:14px;display:flex;flex-direction:column;gap:8px;}
+.mkt-card:hover{border-color:var(--accent)}
+.mkt-card .mc-top{display:flex;align-items:center;gap:8px}
+.mkt-card b{font-size:14px}
+.mc-badge{font-size:11px;border-radius:10px;padding:1px 9px;border:1px solid var(--line);color:var(--sub)}
+.mc-badge.official{border-color:var(--accent);color:var(--accent)}
+.mc-badge.community{border-color:var(--green);color:var(--green)}
+.mc-badge.mine{border-color:#b8860b;color:#b8860b}
+.mkt-card .mc-desc{color:var(--sub);font-size:12.5px;line-height:1.5;flex:1}
+.mkt-card .mc-meta{display:flex;gap:10px;color:var(--sub);font-size:11px;
+  align-items:center;flex-wrap:wrap}
+.mkt-card .mc-meta .mtags{color:var(--accent)}
+.mkt-card .mc-ops{display:flex;gap:8px;margin-top:2px}
+.mkt-empty{color:var(--sub);text-align:center;padding:60px 0;grid-column:1/-1}
+
 /* 术语 tips */
 .term{border-bottom:1px dashed var(--accent);cursor:help;color:inherit;
   position:relative;}
 .term::after{content:'?';font-size:9px;color:var(--accent);vertical-align:super;
   margin-left:1px;}
-/* 模板市场 / 我的模板条目 */
-.mkt-item{display:flex;gap:10px;align-items:center;padding:8px;
-  border:1px solid var(--line);border-radius:6px;margin-bottom:6px;background:var(--bg);}
-.mkt-item:hover{border-color:var(--accent)}
-.mkt-main{flex:1;font-size:12.5px;min-width:0}
-.mkt-tags{color:var(--accent);font-size:11px;margin-left:4px}
-#mktSearch{margin-bottom:2px}
-
 /* 代码搜索下拉 */
 .symbox{position:relative}
 #symDrop{display:none;position:absolute;top:100%;left:0;right:0;z-index:60;
@@ -237,6 +269,7 @@ footer{display:flex;gap:8px;flex-wrap:wrap;padding:0 20px 16px;
 <header>
   <h1>📈 Backtrader 回测实验室</h1>
   <span class="hint">源码直连 · 模板/自定义策略 · ECharts 交互图表 · 参数优化</span>
+  <button id="marketBtn" title="打开模板市场">⊞ 模板市场</button>
   <button id="themeBtn" title="切换亮色/暗色主题">🌙</button>
   <button id="srvBadge" title="服务健康状态，点击立即检测"><span class="sdot"></span><span id="srvText">检测中…</span></button>
 </header>
@@ -280,6 +313,7 @@ footer{display:flex;gap:8px;flex-wrap:wrap;padding:0 20px 16px;
       <label><input type="radio" name="stratSrc" value="template" checked> 策略模板</label>
       <label><input type="radio" name="stratSrc" value="custom"> 自定义代码</label>
     </div>
+    <button class="btn ghost" id="marketBtn2" style="width:100%;margin-bottom:10px">⊞ 打开模板市场（官方 + 第三方 + 我的）</button>
     <div id="tplBox">
       <label class="tlabel">模板</label>
       <select id="tplSel"></select>
@@ -297,14 +331,6 @@ footer{display:flex;gap:8px;flex-wrap:wrap;padding:0 20px 16px;
       </div>
       <div class="hint">params 中声明的参数可在模板模式下直接调参</div>
     </div>
-  </div></details>
-
-  <details><summary>模板市场 · 在线策略库（搜索并导入）</summary><div class="body">
-    <input type="text" id="mktSearch" placeholder="搜索：MACD / 止损 / RSI / 优化…" autocomplete="off">
-    <div id="mktList" class="hint" style="margin-top:8px">加载中…</div>
-  </div></details>
-  <details><summary>我的模板（本地保存，可删除）</summary><div class="body">
-    <div id="myTplList" class="hint">暂无本地模板——可在自定义代码区点「保存为模板」，或从模板市场导入</div>
   </div></details>
 
   <details open id="paramSection"><summary>策略参数</summary><div class="body">
@@ -351,6 +377,23 @@ footer{display:flex;gap:8px;flex-wrap:wrap;padding:0 20px 16px;
 </main>
 
 <footer id="historyBar" style="display:none"></footer>
+<div id="marketOverlay" hidden>
+  <div class="mo-shell">
+    <div class="mo-head">
+      <h2>⊞ 模板市场</h2>
+      <input type="text" id="mktSearch" placeholder="搜索策略：MACD / 止损 / 均线 / 反转…" autocomplete="off">
+      <button id="moClose" class="mo-close">✕ 关闭</button>
+    </div>
+    <div class="mo-tabs">
+      <button class="mo-tab active" data-cat="all">全部</button>
+      <button class="mo-tab" data-cat="official">官方示例</button>
+      <button class="mo-tab" data-cat="community">第三方社区</button>
+      <button class="mo-tab" data-cat="mine">我的模板</button>
+    </div>
+    <div class="mo-hint">官方示例来自 backtrader 官方仓库 samples；第三方来自社区开源仓库——所有模板均经过真实回测验证。点击卡片上的导入即可保存到「我的模板」。</div>
+    <div id="mktGrid"></div>
+  </div>
+</div>
 <div id="tipbox" role="tooltip"><div class="tip-title"></div><div class="tip-body"></div></div>
 
 <div id="logDock">
@@ -608,88 +651,125 @@ async function fetchDataOnline(){
 }
 $('fetchBtn').addEventListener('click', fetchDataOnline);
 
-/* ------------------------------------------------ 模板市场 / 我的模板 / 保存模板 */
-let MKT_TIMER = null;
-async function loadMarket(q){
-  const r = await (await fetch('/api/strategy/market?q=' + encodeURIComponent(q || ''))).json();
-  const list = r.market || [];
-  $('mktList').innerHTML = list.length ? list.map(m => `
-    <div class="mkt-item">
-      <div class="mkt-main">
-        <b>${esc(m.name)}</b> <span class="mkt-tags">${esc(m.tags)}</span><br>
-        <span class="hint">${esc(m.desc)}</span>
-      </div>
-      <button class="btn ghost mkt-import" data-id="${esc(m.id)}">导入</button>
-    </div>`).join('')
-    : '<div class="hint">无匹配模板</div>';
+/* ------------------------------------------------ 模板市场（全屏）/ 我的模板 / 保存模板 */
+let MKT_TIMER = null, MKT_CAT = 'all';
+function openMarket(){
+  $('marketOverlay').hidden = false;
+  renderMarketGrid();
 }
+function closeMarket(){
+  $('marketOverlay').hidden = true;
+}
+$('marketBtn').addEventListener('click', openMarket);
+$('marketBtn2').addEventListener('click', openMarket);
+$('moClose').addEventListener('click', closeMarket);
+$('marketOverlay').addEventListener('click', e => {
+  if (e.target === $('marketOverlay')) closeMarket();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !$('marketOverlay').hidden) closeMarket();
+});
+document.querySelectorAll('.mo-tab').forEach(btn =>
+  btn.addEventListener('click', () => {
+    MKT_CAT = btn.dataset.cat;
+    document.querySelectorAll('.mo-tab').forEach(b => b.classList.toggle('active', b === btn));
+    renderMarketGrid();
+  }));
 $('mktSearch').addEventListener('input', () => {
   clearTimeout(MKT_TIMER);
-  MKT_TIMER = setTimeout(() => loadMarket($('mktSearch').value.trim()), 250);
+  MKT_TIMER = setTimeout(renderMarketGrid, 250);
 });
-$('mktSearch').addEventListener('focus', () => loadMarket($('mktSearch').value.trim()));
-$('mktList').addEventListener('click', async e => {
-  const btn = e.target.closest('.mkt-import');
-  if (!btn) return;
-  btn.disabled = true;
-  btn.textContent = '导入中…';
+
+async function renderMarketGrid(){
+  const grid = $('mktGrid');
+  const q = $('mktSearch').value.trim();
+  if (MKT_CAT === 'mine') {
+    renderMyTplGrid();
+    return;
+  }
+  const provider = MKT_CAT === 'all' ? '' : MKT_CAT;
+  const r = await (await fetch(`/api/strategy/market?q=${encodeURIComponent(q)}&provider=${provider}`)).json();
+  const items = r.market || [];
+  const mine = TEMPLATES.filter(t => CUSTOM_IDS.has(t.id));
+  const mineSrcs = new Set(mine.map(t => (t.source || '')));
+  grid.innerHTML = items.length ? items.map(m => {
+    const imported = mineSrcs.has(`市场导入 · ${m.repo}/${m.path}`);
+    const badge = m.provider === 'community' ? '第三方' : '官方';
+    return `<div class="mkt-card" data-id="${esc(m.id)}">
+      <div class="mc-top"><b>${esc(m.name)}</b>
+        <span class="mc-badge ${esc(m.provider)}">${badge}</span></div>
+      <div class="mc-desc">${esc(m.desc)}</div>
+      <div class="mc-meta">
+        <span class="mtags">${esc(m.tags)}</span>
+        <span>${esc(m.repo)}</span>
+        ${imported ? '<span style="color:var(--green)">✓ 已导入</span>' : ''}
+      </div>
+      <div class="mc-ops">
+        <button class="btn ghost mkt-import" data-id="${esc(m.id)}">${imported ? '再次导入（覆盖）' : '⇊ 导入'}</button>
+      </div>
+    </div>`;
+  }).join('') : '<div class="mkt-empty">无匹配模板</div>';
+}
+
+function renderMyTplGrid(){
+  const grid = $('mktGrid');
+  const custom = TEMPLATES.filter(t => CUSTOM_IDS.has(t.id));
+  grid.innerHTML = custom.length ? custom.map(t => `
+    <div class="mkt-card" data-id="${esc(t.id)}">
+      <div class="mc-top"><b>★ ${esc(t.name)}</b>
+        <span class="mc-badge mine">我的</span></div>
+      <div class="mc-desc">${esc(t.desc || '')}</div>
+      <div class="mc-meta"><span>${esc((t.params || []).length)} 个参数</span>
+        <span>${esc(t.created || '')}</span></div>
+      <div class="mc-ops">
+        <button class="btn ghost mytpl-use" data-id="${esc(t.id)}">▶ 使用</button>
+        <button class="btn ghost mytpl-del" data-id="${esc(t.id)}" style="color:var(--red)">删除</button>
+      </div>
+    </div>`).join('')
+    : '<div class="mkt-empty">还没有本地模板——可从「官方示例/第三方社区」导入，或在自定义代码区点「💾 保存为模板」</div>';
+}
+
+function useTemplate(id){
+  $('tplSel').value = id;
+  onTplChange();
+  document.querySelector('input[name=stratSrc][value=template]').checked = true;
+  $('tplBox').style.display = '';
+  $('customBox').style.display = 'none';
+  renderParamsForSource();
+  closeMarket();
+}
+
+$('mktGrid').addEventListener('click', async e => {
+  const imp = e.target.closest('.mkt-import');
+  const use = e.target.closest('.mytpl-use');
+  const del = e.target.closest('.mytpl-del');
+  if (use) { useTemplate(use.dataset.id); return; }
+  if (del) {
+    if (!confirm('删除该本地模板？')) return;
+    const resp = await fetch('/api/strategy/templates/custom/' + del.dataset.id, {method: 'DELETE'});
+    if (resp.ok) { logMsg('已删除本地模板'); await loadTemplates(); renderMarketGrid(); }
+    else alert('删除失败');
+    return;
+  }
+  if (!imp) return;
+  imp.disabled = true;
+  imp.textContent = '导入中…';
   try {
     const resp = await fetch('/api/strategy/market/import', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({id: btn.dataset.id}),
+      body: JSON.stringify({id: imp.dataset.id}),
     });
     const r = await resp.json();
     if (!resp.ok) { alert('导入失败：' + (r.detail || '')); return; }
     logMsg(`已从市场导入模板：${r.template.name}`, 'ok');
     await loadTemplates();
-    $('tplSel').value = r.template.id;
-    onTplChange();
-    document.querySelector('input[name=stratSrc][value=template]').checked = true;
-    $('tplBox').style.display = '';
-    $('customBox').style.display = 'none';
-    renderParamsForSource();
+    if (MKT_CAT === 'mine') renderMyTplGrid(); else renderMarketGrid();
   } catch (e2) {
     alert('网络错误: ' + e2.message);
   } finally {
-    btn.disabled = false;
-    btn.textContent = '导入';
-  }
-});
-
-function renderMyTplList(){
-  const custom = TEMPLATES.filter(t => CUSTOM_IDS.has(t.id));
-  if (!custom.length) {
-    $('myTplList').innerHTML = '暂无本地模板——可在自定义代码区点「保存为模板」，或从模板市场导入';
-    return;
-  }
-  $('myTplList').innerHTML = custom.map(t => `
-    <div class="mkt-item">
-      <div class="mkt-main">
-        <b>★ ${esc(t.name)}</b><br>
-        <span class="hint">${esc(t.desc || '')}</span>
-      </div>
-      <button class="btn ghost mytpl-use" data-id="${esc(t.id)}">使用</button>
-      <button class="btn ghost mytpl-del" data-id="${esc(t.id)}" style="color:var(--red)">删除</button>
-    </div>`).join('');
-}
-$('myTplList').addEventListener('click', async e => {
-  const use = e.target.closest('.mytpl-use');
-  const del = e.target.closest('.mytpl-del');
-  if (!use && !del) return;
-  const id = (use || del).dataset.id;
-  if (use) {
-    $('tplSel').value = id;
-    onTplChange();
-    document.querySelector('input[name=stratSrc][value=template]').checked = true;
-    $('tplBox').style.display = '';
-    $('customBox').style.display = 'none';
-    renderParamsForSource();
-    return;
-  }
-  if (del && confirm('删除该本地模板？')) {
-    const resp = await fetch('/api/strategy/templates/custom/' + id, {method: 'DELETE'});
-    if (resp.ok) { logMsg('已删除本地模板'); loadTemplates(); }
-    else alert('删除失败');
+    imp.disabled = false;
+    imp.textContent = '⇊ 导入';
+    renderMarketGrid();
   }
 });
 
@@ -731,7 +811,7 @@ async function loadTemplates(){
   sel.innerHTML = html;
   if (LAST_TPL_ID) sel.value = LAST_TPL_ID;
   onTplChange();
-  renderMyTplList();
+  if (!$('marketOverlay').hidden) renderMarketGrid();  // 市场开着时同步刷新
 }
 async function loadGlossary(){
   const r = await (await fetch('/api/terms')).json();
@@ -1297,7 +1377,7 @@ $('histBody').addEventListener('click', async e => {
     // 术语表先行：参数区渲染时 T() 才能包出 .term
     await loadGlossary();
     termifyStatic();
-    await Promise.all([loadDatas(), loadTemplates(), loadProviders(), loadHistory(), loadMarket('')]);
+    await Promise.all([loadDatas(), loadTemplates(), loadProviders(), loadHistory()]);
   } catch (e) {
     showError('初始化失败: ' + e);
     logMsg('初始化失败: ' + e, 'err');
