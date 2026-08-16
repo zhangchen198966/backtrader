@@ -214,3 +214,105 @@ def test_import_from_market_network_failure(monkeypatch, isolated_store):
 def test_import_unknown_market_id(isolated_store):
     with pytest.raises(MarketError, match='未知市场模板'):
         import_from_market('mk-nope')
+
+
+# ------------------------------------------------ 文章型数据源
+
+ARTICLE_HTML = """<html><body>
+<p>intro</p>
+<pre><code>import backtrader as bt
+
+
+class BlogStrategy(bt.Strategy):
+    params = dict(fast=10, slow=30)
+
+    def __init__(self):
+        self.cross = bt.ind.CrossOver(bt.ind.SMA(period=self.p.fast),
+                                      bt.ind.SMA(period=self.p.slow))
+
+    def next(self):
+        if not self.position and self.cross[0] > 0:
+            self.buy()</code></pre>
+<pre><code>{ css: not python }</code></pre>
+<pre><code>print('fragment without class')</code></pre>
+</body></html>"""
+
+
+def test_extract_code_blocks_filters_python():
+    from webapp.strategy_market import extract_code_blocks
+    code = extract_code_blocks(ARTICLE_HTML)
+    assert 'class BlogStrategy' in code
+    assert 'css' not in code            # 非代码块被过滤
+    assert "print('fragment" not in code  # 无 class 特征的片段被过滤
+    validate_strategy_code(code)         # 拼接结果可直接过校验
+
+
+def test_extract_code_blocks_empty():
+    from webapp.strategy_market import extract_code_blocks
+    assert extract_code_blocks('<html><p>no code</p></html>') == ''
+    assert extract_code_blocks('<pre><code>x = 1</code></pre>') == ''
+
+
+def test_download_article_invalid(tmp_path, monkeypatch):
+    import webapp.strategy_market as sm
+    # 网页无策略代码
+    monkeypatch.setattr(sm, 'urllib.request.urlopen',
+                        lambda *a, **k: None) if False else None
+    import urllib.request as _ur
+
+    class FakeResp:
+        def __init__(self, data):
+            self._d = data.encode()
+        def read(self):
+            return self._d
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(sm.urllib.request, 'urlopen',
+                        lambda req, timeout=30: FakeResp('<html>empty</html>'))
+    with pytest.raises(MarketError, match='未找到'):
+        sm.download_article('https://example.com/x')
+
+
+def test_download_article_success(monkeypatch):
+    import webapp.strategy_market as sm
+    import urllib.request as _ur
+
+    class FakeResp:
+        def read(self):
+            return ARTICLE_HTML.encode()
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(sm.urllib.request, 'urlopen',
+                        lambda req, timeout=30: FakeResp())
+    code = sm.download_article('https://example.com/strategy')
+    assert 'class BlogStrategy' in code
+
+
+def test_import_market_article_entry(monkeypatch, isolated_store):
+    """文章型条目：无 repo/url 下载 → 代码块 → 类名自动识别 → 入库"""
+    import webapp.strategy_market as sm
+    monkeypatch.setattr(sm, 'MARKET', [
+        {'id': 'mk-blog-test', 'name': '博客测试策略', 'desc': 'd', 'tags': 't',
+         'provider': 'community', 'site': 'article',
+         'url': 'https://example.com/strategy'}])
+    import urllib.request as _ur
+
+    class FakeResp:
+        def read(self):
+            return ARTICLE_HTML.encode()
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(sm.urllib.request, 'urlopen',
+                        lambda req, timeout=30: FakeResp())
+    entry = sm.import_from_market('mk-blog-test')
+    assert entry['name'] == '博客测试策略'
+    assert 'BlogStrategy' in entry['code']

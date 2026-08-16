@@ -16,6 +16,7 @@ import time
 import urllib.request
 
 import backtrader as bt
+import re as _re_html
 
 from webapp.templatestore import (TemplateError, add_custom,
                                   parse_params_metadata,
@@ -142,6 +143,40 @@ def download_source(repo, path):
         except Exception as e:
             last_err = f'{url}: {type(e).__name__}: {e}'
     raise MarketError(f'下载失败（可稍后重试）: {last_err}')
+
+
+def extract_code_blocks(html_text):
+    """从网页 HTML 提取 Python 代码块（文章型数据源用）。
+
+    识别 <pre><code> 形式，剥内联标签、反转义，过滤含 class/def 的疑似
+    Python 块，按原顺序拼接为一个伪 .py 文件。
+    """
+    import html as _html
+    blocks = _re_html.findall(r'<pre[^>]*>\s*<code[^>]*>(.*?)</code>\s*</pre>', html_text, _re_html.S)
+    if not blocks:  # 宽松模式：裸 <pre> 或 <code>
+        blocks = _re_html.findall(r'<(?:pre|code)[^>]*>(.*?)</(?:pre|code)>', html_text, _re_html.S)
+    py = []
+    for b in blocks:
+        text = _html.unescape(_re_html.sub(r'<[^>]+>', '', b))
+        if 'class' in text and ('def ' in text or 'import' in text) and '{' not in text[:200]:
+            py.append(text.strip('\n'))
+    return '\n\n\n'.join(py)
+
+
+def download_article(url):
+    """文章型数据源：抓取网页 → 提取代码块 → 伪 py 文件"""
+    try:
+        req = urllib.request.Request(url, headers={
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                          'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            html_text = resp.read().decode('utf-8', errors='replace')
+    except Exception as e:
+        raise MarketError(f'网页抓取失败: {type(e).__name__}: {e}')
+    code = extract_code_blocks(html_text)
+    if 'Strategy' not in code or len(code) < 200:
+        raise MarketError('页面中未找到有效的策略代码块')
+    return code
 
 
 # ---------------------------------------------------------------- AST 抽取
@@ -296,8 +331,18 @@ def import_from_market(mid, name_override=None):
     entry = find_market(mid)
     if not entry:
         raise MarketError(f'未知市场模板: {mid}')
-    source = download_source(entry['repo'], entry['path'])
-    code = extract_strategy(source, entry['class'])
+    if entry.get('site') == 'article':
+        source = download_article(entry['url'])
+        # 文章源无指定类名：抽取代码里的第一个 Strategy 类名
+        classes = _re_html.findall(r'class\s+(\w+)\s*\(?[^)\n]*Strategy', source)
+        cls = entry.get('class') or (classes[0] if classes else None)
+        if not cls:
+            raise MarketError('未能从页面代码中识别策略类')
+    else:
+        source = download_source(entry['repo'], entry['path'])
+        cls = entry['class']
+    code = extract_strategy(source, cls)
     name = (name_override or entry['name']).strip()
-    return add_custom(name, code, desc=entry['desc'],
-                      source=f'市场导入 · {entry["repo"]}/{entry["path"]}')
+    src_label = f'市场导入 · {entry.get("url")}' if entry.get('site') == 'article' \
+        else f'市场导入 · {entry["repo"]}/{entry["path"]}'
+    return add_custom(name, code, desc=entry['desc'], source=src_label)

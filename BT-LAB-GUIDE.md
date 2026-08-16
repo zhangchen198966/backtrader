@@ -182,6 +182,16 @@ webapp/
 
 **加市场模板条目**：strategy_market.py 的 MARKET 加一项（repo/path/class），必须先用本地同名文件跑 extract_strategy + 真实回测验证（参见 §7 第 16 条），再更新 test_api/test_e2e 的目录数量断言。
 
+**加文章型数据源**（专业量化网页，区别于 git 仓库）：MARKET 条目用 `{'site': 'article', 'url': ..., 'class': 可选}`，无需 repo/path。下载层自动抓网页 → `extract_code_blocks` 提取 <pre><code> Python 块（过滤非 Python 特征块）→ 拼接伪 .py → 走同一抽取/校验管线；class 不填则自动识别代码中第一个 Strategy 类。
+
+**非 git 专业量化网站调研结论**（2026-08 实测，接入前先复查是否复活）：
+- community.backtrader.com 官方社区：Cloudflare 522，源站随项目停维（2023 后）一起下线
+- backtrader.com 官方文档：同样下线（404）
+- StackOverflow：API 可用（api.stackexchange.com），但 backtrader 问答均为排障片段，无完整策略类
+- QuantConnect/vn.py/聚宽/掘金/BIGQuant：专有框架非 backtrader 生态，代码不通用
+- Medium/知乎/CSDN：登录墙/反爬；且完整代码作者通常最终也放 GitHub
+- 文章型源基础设施已就绪并有完整测试覆盖，任何可访问网页 5 分钟可接入
+
 **加术语**：`glossary.py` 加词条即可，前后端自动生效（前端经 /api/terms 拉取）。注意长词优先机制：新词条若是现有词的子串，会优先匹配长词。
 
 **加分析器/绩效指标**：runner.py `run_one_backtest` 里 `cerebro.addanalyzer(...)` → `summarize()` 提取 → 前端 `renderBacktest` 加卡片（label 走 `T()` 自动获得术语 tips）。
