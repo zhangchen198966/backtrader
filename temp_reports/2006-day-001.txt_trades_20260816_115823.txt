@@ -1,0 +1,36 @@
+=== SUNRISE STRATEGY TRADE REPORT ===
+Asset: 2006-day-001.txt
+Generated: 2026-08-16 11:58:23
+Data File: 2006-day-001.txt
+Trading Direction: LONG
+
+CONFIGURATION PARAMETERS:
+------------------------------
+LONG Configuration:
+  ATR Range: 0.000000 - 2.000000
+  ATR Increment Range: 0.200000 to 1.600000
+  Angle Range: 35.00° to 95.00°
+  Candle Direction Filter: DISABLED
+  Pullback Mode: True
+
+Common Parameters:
+  Risk Percent: 0.0%
+  Trading Hours: 24/7 (No time filter)
+  Window Time Offset: DISABLED (Immediate window opening)
+  LONG Stop Loss ATR Multiplier: 4.5
+  LONG Take Profit ATR Multiplier: 6.5
+
+================================================================================
+TRADE DETAILS
+================================================================================
+
+
+================================================================================
+SUMMARY
+================================================================================
+Total Trades: 0
+Winning Trades: 0
+Losing Trades: 0
+Win Rate: 0.00%
+Total P&L: 0.00
+================================================================================

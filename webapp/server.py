@@ -40,6 +40,7 @@ os.makedirs(TASKS_DIR, exist_ok=True)
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 app = FastAPI(title='bt-lab')
+STARTED_AT = time.time()
 app.mount('/static', StaticFiles(directory=STATIC_DIR), name='static')
 
 
@@ -222,6 +223,24 @@ class FetchBody(BaseModel):
 
 class RunBody(BaseModel):
     mode: str = 'backtest'
+
+
+def _git_commit():
+    """当前代码版本（git describe；非 git 环境返回 unknown）"""
+    import subprocess as _sp
+    try:
+        r = _sp.run(['git', 'log', '-1', '--format=%h %ci'], cwd=REPO_ROOT,
+                    capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() or 'unknown'
+    except Exception:
+        return 'unknown'
+
+
+@app.get('/api/meta')
+def api_meta():
+    """构建版本（前端展示，用于识别服务是否需要重启更新）"""
+    return {'commit': _git_commit(),
+            'started': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(STARTED_AT))}
 
 
 @app.get('/')

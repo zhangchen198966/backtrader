@@ -173,9 +173,21 @@ def test_market_apis():
     r = client.get('/api/strategy/market')
     assert r.status_code == 200
     items = r.json()['market']
-    assert len(items) >= 7
+    assert len(items) >= 10
     r = client.get('/api/strategy/market', params={'q': '止损'})
     assert any('mk-stoptrail' == m['id'] for m in r.json()['market'])
+    # provider 过滤
+    r = client.get('/api/strategy/market', params={'provider': 'community'})
+    comm = r.json()['market']
+    assert len(comm) == 3 and all(m['provider'] == 'community' for m in comm)
+    r = client.get('/api/strategy/market', params={'provider': 'official'})
+    assert all(m['provider'] == 'official' for m in r.json()['market'])
+
+def test_meta_api():
+    r = client.get('/api/meta')
+    assert r.status_code == 200
+    body = r.json()
+    assert body['commit'] and body['started']
     r = client.post('/api/strategy/market/import', json={'id': 'mk-nope'})
     assert r.status_code == 400
 

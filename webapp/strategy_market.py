@@ -74,6 +74,12 @@ MARKET = [
      'tags': 'Stochastic 支撑阻力 反转', 'provider': 'community',
      'repo': 'jasgin/backtrader-backtests',
      'path': 'StochasticSR/Stochastic_SR_Backtest.py', 'class': 'StochasticSR'},
+    {'id': 'mk-sunrise-ogle', 'name': '黄金 XAUUSD 拉回窗口策略（专业级）',
+     'desc': '第三方专业策略（66★）：多周期波动率扩张 + 拉回窗口入场，31 个可调参数，'
+             '含完整风控。原为 XAUUSD 设计，可试用于其他品种。',
+     'tags': '拉回 波动率 多周期 风控', 'provider': 'community',
+     'repo': 'ilahuerta-IA/backtrader-pullback-window-xauusd',
+     'path': 'src/strategy/sunrise_ogle_xauusd.py', 'class': 'SunriseOgle'},
 ]
 
 
@@ -140,10 +146,30 @@ def _collect_bases(tree, target):
     return list(reversed(chain))
 
 
-def extract_strategy(source_code, class_name):
-    """抽取 imports + 目标类（含文件内基类）的源码段。
+def _seg(source_code, lines, node):
+    return ast.get_source_segment(source_code, node) or \
+        '\n'.join(lines[node.lineno - 1:node.end_lineno])
 
-    返回拼接后的可执行策略代码；找不到类抛 MarketError。
+
+def _literal_like(node):
+    """模块级常量赋值的右值判定（排除会在导入时产生副作用的 Call 等）"""
+    if isinstance(node, (ast.Constant, ast.List, ast.Tuple, ast.Dict, ast.Set)):
+        return True
+    if isinstance(node, (ast.Name, ast.Attribute)):
+        return True
+    if isinstance(node, ast.UnaryOp):
+        return _literal_like(node.operand)
+    if isinstance(node, ast.BinOp):
+        return _literal_like(node.left) and _literal_like(node.right)
+    return False
+
+
+def extract_strategy(source_code, class_name):
+    """抽取可独立运行的策略代码。
+
+    收集模块级：imports、函数/类定义（含目标类继承链）、字面量常量赋值
+    （策略类可能引用模块常量如 ENABLE_LONG_TRADES）；
+    排除导入时会执行的语句（对象创建、if __main__ 等）。
     """
     try:
         tree = ast.parse(source_code)
@@ -155,16 +181,21 @@ def extract_strategy(source_code, class_name):
         raise MarketError(f'源码中未找到策略类 {class_name}')
 
     lines = source_code.split('\n')
-
-    imports = []
+    parts = ['"""从模板市场导入"""']
     for node in tree.body:
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            imports.append(ast.get_source_segment(source_code, node)
-                           or '\n'.join(lines[node.lineno - 1:node.end_lineno]))
-
-    parts = ['"""从模板市场导入"""'] + imports
-    for node in chain:
-        seg = ast.get_source_segment(source_code, node)
+        seg = None
+        if isinstance(node, (ast.Import, ast.ImportFrom,
+                             ast.FunctionDef, ast.AsyncFunctionDef,
+                             ast.ClassDef)):
+            seg = _seg(source_code, lines, node)
+        elif isinstance(node, ast.Assign) and \
+                all(isinstance(t, ast.Name) for t in node.targets) and \
+                _literal_like(node.value):
+            seg = _seg(source_code, lines, node)
+        elif isinstance(node, ast.AnnAssign) and \
+                isinstance(node.target, ast.Name) and \
+                node.value is not None and _literal_like(node.value):
+            seg = _seg(source_code, lines, node)
         if seg:
             parts.append(seg)
 

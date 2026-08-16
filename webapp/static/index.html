@@ -272,6 +272,7 @@ footer{display:flex;gap:8px;flex-wrap:wrap;padding:0 20px 16px;
   <button id="marketBtn" title="打开模板市场">⊞ 模板市场</button>
   <button id="themeBtn" title="切换亮色/暗色主题">🌙</button>
   <button id="srvBadge" title="服务健康状态，点击立即检测"><span class="sdot"></span><span id="srvText">检测中…</span></button>
+  <span id="buildBadge" class="hint" title=""></span>
 </header>
 
 <main>
@@ -975,6 +976,17 @@ $('logToggle').addEventListener('click', () => {
 // 初始面板
 $('logBody').classList.add('on');
 
+/* ------------------------------------------------ 构建版本（识别旧进程） */
+async function loadBuildInfo(){
+  try {
+    const r = await (await fetch('/api/meta')).json();
+    const short = r.commit.split(' ')[0];
+    $('buildBadge').textContent = 'build ' + short;
+    $('buildBadge').title = `服务代码版本: ${r.commit}\n服务启动于: ${r.started}\n\n`
+      + '页面刷新会自动用最新前端；但 Python 接口改动需要重启服务（./stop.sh && ./start.sh）';
+  } catch { $('buildBadge').textContent = ''; }
+}
+
 /* ------------------------------------------------ 服务健康 */
 async function heartbeat(){
   try {
@@ -1378,6 +1390,7 @@ $('histBody').addEventListener('click', async e => {
     await loadGlossary();
     termifyStatic();
     await Promise.all([loadDatas(), loadTemplates(), loadProviders(), loadHistory()]);
+    loadBuildInfo();
   } catch (e) {
     showError('初始化失败: ' + e);
     logMsg('初始化失败: ' + e, 'err');
