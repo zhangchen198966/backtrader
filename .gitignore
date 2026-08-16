@@ -80,3 +80,4 @@ demo_backtest.png
 webapp/cache/
 .btlab.pid
 webapp/templates_custom.json
+/optimization.csv
