@@ -129,6 +129,57 @@ def test_datas_and_templates_api():
                                        'bbands_reversal', 'macd_signal'}
 
 
+def test_builtin_template_params_have_units():
+    """目标1：所有内置模板参数必须带单位说明"""
+    from webapp.templates import TEMPLATES
+    n = 0
+    for t in TEMPLATES:
+        for p in t['params']:
+            assert p.get('unit'), f"{t['id']}.{p['name']} 缺少 unit"
+            n += 1
+    assert n >= 14
+
+
+def test_template_apis_crud(tmp_path, monkeypatch):
+    """自定义模板：保存→合并列表→删除；非法代码 400"""
+    import webapp.templatestore as ts
+    monkeypatch.setattr(ts, 'STORE_PATH', str(tmp_path / 't.json'))
+    import webapp.server as srv
+    monkeypatch.setattr(srv, 'add_custom', ts.add_custom)
+    monkeypatch.setattr(srv, 'list_custom', ts.list_custom)
+    monkeypatch.setattr(srv, 'delete_custom', ts.delete_custom)
+
+    code = ('import backtrader as bt\n\nclass T(bt.Strategy):\n'
+            '    params = dict(n=5)\n    def next(self):\n        pass\n')
+    r = client.post('/api/strategy/templates/custom',
+                    json={'name': 'API测试模板', 'code': code})
+    assert r.status_code == 200
+    tid = r.json()['template']['id']
+
+    r = client.get('/api/strategy/templates')
+    assert tid in r.json()['custom_ids']
+
+    r = client.post('/api/strategy/templates/custom',
+                    json={'name': '坏的', 'code': 'nope'})
+    assert r.status_code == 400
+
+    r = client.delete(f'/api/strategy/templates/custom/{tid}')
+    assert r.status_code == 200
+    r = client.delete(f'/api/strategy/templates/custom/{tid}')
+    assert r.status_code == 404
+
+
+def test_market_apis():
+    r = client.get('/api/strategy/market')
+    assert r.status_code == 200
+    items = r.json()['market']
+    assert len(items) >= 7
+    r = client.get('/api/strategy/market', params={'q': '止损'})
+    assert any('mk-stoptrail' == m['id'] for m in r.json()['market'])
+    r = client.post('/api/strategy/market/import', json={'id': 'mk-nope'})
+    assert r.status_code == 400
+
+
 def test_run_validation():
     """run 参数校验：mode / 数据缺失 → 400，不产生任务"""
     r = client.post('/api/run', json={'mode': 'bad'})

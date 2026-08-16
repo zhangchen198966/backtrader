@@ -54,7 +54,9 @@ webapp/
 ├── runner.py        # 回测执行器：backtest / optimize 两种模式
 ├── datasource.py    # 在线数据源：抓取/清洗/落盘 + 名称清单缓存 + 搜索
 ├── datainspect.py   # CSV 结构探测（分隔符/表头/日期格式/时间列）
-├── templates.py     # 4 个内置策略模板（源码+参数元数据）
+├── templates.py     # 内置策略模板（源码+参数元数据+单位）
+├── templatestore.py # 自定义模板本地存储（验证/AST参数解析）
+├── strategy_market.py # 模板市场：GitHub samples 在线目录+下载+AST抽取
 ├── glossary.py      # 57 条术语表（/api/terms）
 ├── static/
 │   ├── index.html   # 单页应用（CSS/主逻辑内联）
@@ -88,6 +90,11 @@ webapp/
 | `/api/task/{id}/kill` | POST | 终止子进程 |
 | `/api/tasks` | GET | 最近 20 条（含策略/参数/结果摘要，历史面板用） |
 | `/api/task/{id}` | DELETE | 删除历史任务（运行中拒删） |
+| `/api/strategy/templates` | GET | 内置+本地模板（custom_ids 标记本地） |
+| `/api/strategy/templates/custom` | POST | 自定义代码存为模板（校验） |
+| `/api/strategy/templates/custom/{id}` | DELETE | 删除本地模板 |
+| `/api/strategy/market` | GET | 在线模板市场目录（?q= 关键词） |
+| `/api/strategy/market/import` | POST | 下载→AST抽取→校验→入库 |
 
 ### 4.2 TaskManager（server.py）
 
@@ -162,12 +169,18 @@ webapp/
 13. **中文 URL 参数**：curl 测中文 query 必须 `--data-urlencode -G`，裸中文会 `Invalid HTTP request`（浏览器 fetch 自动编码，不受影响）。
 14. **任务历史列表上限 20**：相关断言用任务 id 是否消失，不要断言行数减一。
 15. **静态文件即时生效，Python 改动需重启**：index.html/bt-lab.js 改完刷新页面即可；server.py/runner.py 改动需重启 uvicorn。
+16. **官方 samples 与库版本脱节**：部分样本引用当前库已不存在的指标（如 lrsi-test.py 的 LaguerreRSI2/3）或要求多数据源（multitimeframe），进市场目录前必须真实回测验证。
+17. **runner 子进程读不到本进程的 monkeypatch 存储**：本地模板在 /api/run 提交时由服务端解析成 code 塞进请求（strategy_market 的 resolved_params_meta），子进程不依赖存储文件；测试直连 runner 时用 BT_LAB_TPL_STORE 环境变量隔离。
+18. **AST 解析类基类**：`class X(bt.Strategy)` 的基类是 Attribute 节点，`getattr(b,'id')` 取不到，必须 `ast.unparse(b)`；基类链抽取后要反转为"基类在前"否则 NameError。
+19. **隐藏元素 innerText 为空**：折叠 details 内的元素 Playwright inner_text() 返回 ''，断言前先展开面板（open_details 辅助函数）。
 
 ## 8. 常见迭代操作
 
 **加一个策略模板**：`templates.py` 的 TEMPLATES 加一项（id/name/desc/params 元数据/code）。code 里 `params = dict(...)` 的键必须与元数据 name 一致；int 参数标 `'int': True`（runner 会做 float→int 归一）。无后端改动，自动出现在下拉里。
 
 **加一个在线数据源**：`datasource.py` 加 fetcher（返回 `normalize_ohlc_rows` 的标准行）→ 注册进 FETCHERS + PROVIDERS（含 symbol_re 校验与提示文案）→（如需中文名搜索）`lookup_symbol_name` 加分支。
+
+**加市场模板条目**：strategy_market.py 的 MARKET 加一项（repo/path/class），必须先用本地同名文件跑 extract_strategy + 真实回测验证（参见 §7 第 16 条），再更新 test_api/test_e2e 的目录数量断言。
 
 **加术语**：`glossary.py` 加词条即可，前后端自动生效（前端经 /api/terms 拉取）。注意长词优先机制：新词条若是现有词的子串，会优先匹配长词。
 

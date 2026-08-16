@@ -23,6 +23,7 @@ import types
 import backtrader as bt
 
 from webapp.datainspect import inspect_csv
+from webapp.templatestore import find_custom
 from webapp.templates import get_template
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -90,12 +91,19 @@ def build_strategy_class(spec):
     params = dict(spec.get('params') or {})
 
     if source == 'template':
-        tpl = get_template(spec.get('template_id'))
-        if tpl is None:
+        tpl = get_template(spec.get('template_id')) or \
+            find_custom(spec.get('template_id'))
+        if tpl is not None:
+            code = tpl['code']
+            param_metas = tpl.get('params') or []
+        elif spec.get('code'):
+            # 服务端提交时已解析的本地模板（子进程无需读存储文件）
+            code = spec['code']
+            param_metas = spec.get('resolved_params_meta') or []
+        else:
             raise RequestError(f'未知策略模板: {spec.get("template_id")}')
-        code = tpl['code']
         # 按模板元数据把 int 参数从 float 归一（HTML number 输入可能带来 10.0）
-        for meta in tpl['params']:
+        for meta in param_metas:
             val = params.get(meta['name'])
             if meta.get('int') and isinstance(val, (int, float)):
                 params[meta['name']] = int(val)

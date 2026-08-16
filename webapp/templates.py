@@ -11,8 +11,8 @@ TEMPLATES = [
         'name': '双均线交叉',
         'desc': '快慢均线金叉做多、死叉平仓。最经典的趋势跟踪入门策略。',
         'params': [
-            {'name': 'fast', 'label': '快均线', 'default': 10, 'min': 2, 'max': 100, 'step': 1, 'int': True},
-            {'name': 'slow', 'label': '慢均线', 'default': 30, 'min': 3, 'max': 250, 'step': 1, 'int': True},
+            {'name': 'fast', 'label': '快均线', 'default': 10, 'min': 2, 'max': 100, 'step': 1, 'int': True, 'unit': 'bar 数'},
+            {'name': 'slow', 'label': '慢均线', 'default': 30, 'min': 3, 'max': 250, 'step': 1, 'int': True, 'unit': 'bar 数'},
         ],
         'code': '''\
 import backtrader as bt
@@ -47,12 +47,12 @@ class SmaCross(bt.Strategy):
         'name': '双均线 + RSI过滤 + ATR跟踪止损',
         'desc': '金叉且 RSI 确认趋势强度时做多；死叉或跌破 3 倍 ATR 跟踪止损线离场。',
         'params': [
-            {'name': 'fast', 'label': '快均线', 'default': 10, 'min': 2, 'max': 100, 'step': 1, 'int': True},
-            {'name': 'slow', 'label': '慢均线', 'default': 30, 'min': 3, 'max': 250, 'step': 1, 'int': True},
-            {'name': 'rsi_period', 'label': 'RSI周期', 'default': 14, 'min': 2, 'max': 100, 'step': 1, 'int': True},
-            {'name': 'rsi_min', 'label': 'RSI下限', 'default': 50, 'min': 0, 'max': 100, 'step': 1, 'int': True},
-            {'name': 'atr_period', 'label': 'ATR周期', 'default': 14, 'min': 2, 'max': 100, 'step': 1, 'int': True},
-            {'name': 'atr_mult', 'label': 'ATR止损倍数', 'default': 3.0, 'min': 0.5, 'max': 10.0, 'step': 0.5, 'int': False},
+            {'name': 'fast', 'label': '快均线', 'default': 10, 'min': 2, 'max': 100, 'step': 1, 'int': True, 'unit': 'bar 数'},
+            {'name': 'slow', 'label': '慢均线', 'default': 30, 'min': 3, 'max': 250, 'step': 1, 'int': True, 'unit': 'bar 数'},
+            {'name': 'rsi_period', 'label': 'RSI周期', 'default': 14, 'min': 2, 'max': 100, 'step': 1, 'int': True, 'unit': 'bar 数'},
+            {'name': 'rsi_min', 'label': 'RSI下限', 'default': 50, 'min': 0, 'max': 100, 'step': 1, 'int': True, 'unit': '0~100'},
+            {'name': 'atr_period', 'label': 'ATR周期', 'default': 14, 'min': 2, 'max': 100, 'step': 1, 'int': True, 'unit': 'bar 数'},
+            {'name': 'atr_mult', 'label': 'ATR止损倍数', 'default': 3.0, 'min': 0.5, 'max': 10.0, 'step': 0.5, 'int': False, 'unit': '倍数'},
         ],
         'code': '''\
 import backtrader as bt
@@ -96,9 +96,9 @@ class SmaRsiAtrStrategy(bt.Strategy):
         'name': '布林带反转',
         'desc': '收盘价跌破下轨买入博反弹，回到中轨或跌破止损线离场（均值回归思路）。',
         'params': [
-            {'name': 'period', 'label': '布林周期', 'default': 20, 'min': 5, 'max': 100, 'step': 1, 'int': True},
-            {'name': 'dev', 'label': '标准差倍数', 'default': 2.0, 'min': 0.5, 'max': 4.0, 'step': 0.25, 'int': False},
-            {'name': 'stop_pct', 'label': '止损幅度%', 'default': 5.0, 'min': 1.0, 'max': 30.0, 'step': 0.5, 'int': False},
+            {'name': 'period', 'label': '布林周期', 'default': 20, 'min': 5, 'max': 100, 'step': 1, 'int': True, 'unit': 'bar 数'},
+            {'name': 'dev', 'label': '标准差倍数', 'default': 2.0, 'min': 0.5, 'max': 4.0, 'step': 0.25, 'int': False, 'unit': '标准差倍数'},
+            {'name': 'stop_pct', 'label': '止损幅度%', 'default': 5.0, 'min': 1.0, 'max': 30.0, 'step': 0.5, 'int': False, 'unit': '%'},
         ],
         'code': '''\
 import backtrader as bt
@@ -138,9 +138,9 @@ class BbandsReversal(bt.Strategy):
         'name': 'MACD 信号',
         'desc': 'MACD 信号线上穿做多、下穿平仓，可调快慢均线与信号周期。',
         'params': [
-            {'name': 'fast', 'label': '快EMA', 'default': 12, 'min': 2, 'max': 50, 'step': 1, 'int': True},
-            {'name': 'slow', 'label': '慢EMA', 'default': 26, 'min': 3, 'max': 200, 'step': 1, 'int': True},
-            {'name': 'signal', 'label': '信号EMA', 'default': 9, 'min': 2, 'max': 50, 'step': 1, 'int': True},
+            {'name': 'fast', 'label': '快EMA', 'default': 12, 'min': 2, 'max': 50, 'step': 1, 'int': True, 'unit': 'bar 数'},
+            {'name': 'slow', 'label': '慢EMA', 'default': 26, 'min': 3, 'max': 200, 'step': 1, 'int': True, 'unit': 'bar 数'},
+            {'name': 'signal', 'label': '信号EMA', 'default': 9, 'min': 2, 'max': 50, 'step': 1, 'int': True, 'unit': 'bar 数'},
         ],
         'code': '''\
 import backtrader as bt

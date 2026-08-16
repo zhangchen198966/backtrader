@@ -587,6 +587,116 @@ def test_data_default_selection_and_delete(page):
             os.remove(dummy)
 
 
+# ---------------------------------------------------------------- 参数单位 / 模板市场 / 保存模板
+
+def open_details(page, text):
+    """展开指定标题的折叠面板"""
+    page.evaluate(
+        f'() => [...document.querySelectorAll("details")]'
+        f'.filter(d => d.querySelector("summary")'
+        f'  && d.querySelector("summary").innerText.includes({text!r}))'
+        f'.forEach(d => {{ d.open = true; }})')
+
+
+def test_param_units_visible(page):
+    """目标1：参数标签显示单位（如 bar 数 / 倍数 / 0~100）"""
+    page.select_option('#tplSel', 'sma_rsi_atr')
+    page.wait_for_timeout(200)
+    labels = page.locator('.p-label').all_inner_texts()
+    assert any('bar 数' in t for t in labels), f'应显示 bar 数单位: {labels}'
+    assert any('倍数' in t for t in labels), 'ATR止损倍数应显示 倍数'
+    assert any('0~100' in t for t in labels), 'RSI下限应显示 0~100'
+    # MACD 模板
+    page.select_option('#tplSel', 'macd_signal')
+    page.wait_for_timeout(200)
+    labels = page.locator('.p-label').all_inner_texts()
+    assert sum('bar 数' in t for t in labels) == 3
+
+
+def test_save_custom_code_as_template(page):
+    """目标3：自定义代码保存为模板 → 出现在下拉与我的模板 → 可运行 → 可删除"""
+    page.click('input[name=stratSrc][value=custom]')
+    page.wait_for_selector('#editor:visible', timeout=5000)
+    page.click('#loadTplBtn')  # 载入当前模板代码
+    code = page.locator('#editor').input_value()
+    assert 'class' in code
+
+    page.once('dialog', lambda d: d.accept('E2E保存模板'))
+    page.click('#saveTplBtn')
+    page.wait_for_timeout(800)
+
+    # 下拉出现保存的模板（★ 前缀标记）并选中
+    assert '★ E2E保存模板' in page.locator('#tplSel').inner_text()
+    sel_val = page.locator('#tplSel').input_value()
+    assert sel_val.startswith('custom-')
+    # 我的模板面板出现该条目（先展开折叠面板，隐藏元素 innerText 为空）
+    open_details(page, '我的模板')
+    page.wait_for_timeout(200)
+    assert 'E2E保存模板' in page.locator('#myTplList').inner_text()
+
+    # 用保存的模板真实跑一次回测
+    uncheck_all_data(page)
+    check_data(page, DATA1)
+    page.click('#runBtn')
+    wait_done(page)
+    assert page.locator('#errorBox').is_hidden()
+    assert page.locator('.card').count() == 12
+
+    # 删除清理（面板已展开）
+    page.on('dialog', lambda d: d.accept())
+    page.locator('#myTplList .mytpl-del').first.click()
+    page.wait_for_timeout(600)
+    open_details(page, '我的模板')
+    assert 'E2E保存模板' not in page.locator('#myTplList').inner_text()
+
+
+def test_market_search_and_import(page):
+    """目标2：模板市场目录/搜索/在线导入，导入后可运行"""
+    page.click('text=模板市场 · 在线策略库（搜索并导入）')
+    page.wait_for_selector('.mkt-item', timeout=15000)
+    n_all = page.locator('.mkt-item').count()
+    assert n_all >= 7, f'市场目录应≥7条（实际{n_all}）'
+
+    # 关键词搜索过滤
+    page.fill('#mktSearch', 'MACD')
+    page.wait_for_timeout(500)
+    names = page.locator('.mkt-item').all_inner_texts()
+    assert len(names) < n_all and any('MACD' in t for t in names)
+    page.fill('#mktSearch', '')
+    page.wait_for_timeout(500)
+
+    # 真实在线导入（网络不可达则跳过，不误报红）
+    import httpx
+    try:
+        probe = httpx.get('https://cdn.jsdelivr.net/gh/mementum/backtrader@'
+                          'master/samples/stoptrail/trail.py',
+                          timeout=8, trust_env=False)
+        net_ok = probe.status_code == 200
+    except Exception:
+        net_ok = False
+    if not net_ok:
+        pytest.skip('jsdelivr 不可达，市场在线导入已由离线 mock 测试覆盖')
+
+    page.locator('.mkt-import[data-id="mk-stoptrail"]').click()
+    open_details(page, '我的模板')
+    page.wait_for_selector('#myTplList .mkt-item', timeout=60000)
+    assert '移动止损' in page.locator('#myTplList').inner_text()
+    # 导入后自动选中为当前模板
+    assert page.locator('#tplSel').input_value().startswith('custom-')
+
+    # 导入的模板真实回测
+    uncheck_all_data(page)
+    check_data(page, DATA1)
+    page.click('#runBtn')
+    wait_done(page)
+    assert page.locator('#errorBox').is_hidden()
+
+    # 清理导入的模板（面板已展开）
+    page.on('dialog', lambda d: d.accept())
+    page.locator('#myTplList .mytpl-del').first.click()
+    page.wait_for_timeout(500)
+
+
 # ---------------------------------------------------------------- 在线获取：日期控件 + 中文名搜索
 
 def test_fetch_panel_date_pickers_and_symbol_search(page):

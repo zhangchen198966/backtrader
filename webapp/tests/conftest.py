@@ -14,14 +14,14 @@ WEBAPP_DIR = os.path.join(REPO_ROOT, 'webapp')
 PYTHON = sys.executable
 
 
-def run_runner(request_dict, tmp_path):
+def run_runner(request_dict, tmp_path, env=None):
     """直接以子进程方式跑一次 runner，返回 (status, result|None, error|None)"""
     task_dir = str(tmp_path / ('task-' + uuid.uuid4().hex[:8]))
     os.makedirs(task_dir)
     with open(os.path.join(task_dir, 'request.json'), 'w') as f:
         json.dump(request_dict, f, ensure_ascii=False)
     subprocess.run([PYTHON, '-m', 'webapp.runner', task_dir],
-                   cwd=REPO_ROOT, capture_output=True, timeout=300)
+                   cwd=REPO_ROOT, capture_output=True, timeout=300, env=env)
     with open(os.path.join(task_dir, 'status')) as f:
         status = f.read().strip()
     result = error = None
@@ -71,10 +71,16 @@ def live_server():
     port = 8601
     with socket.socket() as s:
         s.bind(('127.0.0.1', port))
+    import tempfile
+    tpl_store = os.path.join(tempfile.gettempdir(), 'btlab-e2e-templates.json')
+    if os.path.exists(tpl_store):
+        os.remove(tpl_store)
+    env = dict(os.environ, BT_LAB_TPL_STORE=tpl_store)
     proc = subprocess.Popen(
         [PYTHON, '-m', 'uvicorn', 'webapp.server:app', '--port', str(port),
          '--log-level', 'warning'],
-        cwd=REPO_ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        cwd=REPO_ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        env=env)
     base = f'http://127.0.0.1:{port}'
     try:
         for _ in range(60):

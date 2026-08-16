@@ -105,6 +105,14 @@ select:focus,input:focus{border-color:var(--accent)}
   position:relative;}
 .term::after{content:'?';font-size:9px;color:var(--accent);vertical-align:super;
   margin-left:1px;}
+/* 模板市场 / 我的模板条目 */
+.mkt-item{display:flex;gap:10px;align-items:center;padding:8px;
+  border:1px solid var(--line);border-radius:6px;margin-bottom:6px;background:var(--bg);}
+.mkt-item:hover{border-color:var(--accent)}
+.mkt-main{flex:1;font-size:12.5px;min-width:0}
+.mkt-tags{color:var(--accent);font-size:11px;margin-left:4px}
+#mktSearch{margin-bottom:2px}
+
 /* 代码搜索下拉 */
 .symbox{position:relative}
 #symDrop{display:none;position:absolute;top:100%;left:0;right:0;z-index:60;
@@ -285,9 +293,18 @@ footer{display:flex;gap:8px;flex-wrap:wrap;padding:0 20px 16px;
       </div>
       <div class="row" style="margin-top:6px">
         <button class="btn ghost" id="loadTplBtn">从当前模板载入代码</button>
+        <button class="btn ghost" id="saveTplBtn" title="把当前编辑器代码保存为可复用的本地模板">💾 保存为模板</button>
       </div>
       <div class="hint">params 中声明的参数可在模板模式下直接调参</div>
     </div>
+  </div></details>
+
+  <details><summary>模板市场 · 在线策略库（搜索并导入）</summary><div class="body">
+    <input type="text" id="mktSearch" placeholder="搜索：MACD / 止损 / RSI / 优化…" autocomplete="off">
+    <div id="mktList" class="hint" style="margin-top:8px">加载中…</div>
+  </div></details>
+  <details><summary>我的模板（本地保存，可删除）</summary><div class="body">
+    <div id="myTplList" class="hint">暂无本地模板——可在自定义代码区点「保存为模板」，或从模板市场导入</div>
   </div></details>
 
   <details open id="paramSection"><summary>策略参数</summary><div class="body">
@@ -354,7 +371,7 @@ footer{display:flex;gap:8px;flex-wrap:wrap;padding:0 20px 16px;
 <script>
 'use strict';
 const B = window.BTLab;
-let TEMPLATES = [], CUR_TASK = null, POLL_TIMER = null, LAST_TPL_ID = null;
+let TEMPLATES = [], CUSTOM_IDS = new Set(), CUR_TASK = null, POLL_TIMER = null, LAST_TPL_ID = null;
 let GLOSSARY = {};
 let CUR_THEME = 'dark';
 const CHARTS = [];        // 活动的 echarts 实例
@@ -591,14 +608,130 @@ async function fetchDataOnline(){
 }
 $('fetchBtn').addEventListener('click', fetchDataOnline);
 
+/* ------------------------------------------------ 模板市场 / 我的模板 / 保存模板 */
+let MKT_TIMER = null;
+async function loadMarket(q){
+  const r = await (await fetch('/api/strategy/market?q=' + encodeURIComponent(q || ''))).json();
+  const list = r.market || [];
+  $('mktList').innerHTML = list.length ? list.map(m => `
+    <div class="mkt-item">
+      <div class="mkt-main">
+        <b>${esc(m.name)}</b> <span class="mkt-tags">${esc(m.tags)}</span><br>
+        <span class="hint">${esc(m.desc)}</span>
+      </div>
+      <button class="btn ghost mkt-import" data-id="${esc(m.id)}">导入</button>
+    </div>`).join('')
+    : '<div class="hint">无匹配模板</div>';
+}
+$('mktSearch').addEventListener('input', () => {
+  clearTimeout(MKT_TIMER);
+  MKT_TIMER = setTimeout(() => loadMarket($('mktSearch').value.trim()), 250);
+});
+$('mktSearch').addEventListener('focus', () => loadMarket($('mktSearch').value.trim()));
+$('mktList').addEventListener('click', async e => {
+  const btn = e.target.closest('.mkt-import');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = '导入中…';
+  try {
+    const resp = await fetch('/api/strategy/market/import', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id: btn.dataset.id}),
+    });
+    const r = await resp.json();
+    if (!resp.ok) { alert('导入失败：' + (r.detail || '')); return; }
+    logMsg(`已从市场导入模板：${r.template.name}`, 'ok');
+    await loadTemplates();
+    $('tplSel').value = r.template.id;
+    onTplChange();
+    document.querySelector('input[name=stratSrc][value=template]').checked = true;
+    $('tplBox').style.display = '';
+    $('customBox').style.display = 'none';
+    renderParamsForSource();
+  } catch (e2) {
+    alert('网络错误: ' + e2.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '导入';
+  }
+});
+
+function renderMyTplList(){
+  const custom = TEMPLATES.filter(t => CUSTOM_IDS.has(t.id));
+  if (!custom.length) {
+    $('myTplList').innerHTML = '暂无本地模板——可在自定义代码区点「保存为模板」，或从模板市场导入';
+    return;
+  }
+  $('myTplList').innerHTML = custom.map(t => `
+    <div class="mkt-item">
+      <div class="mkt-main">
+        <b>★ ${esc(t.name)}</b><br>
+        <span class="hint">${esc(t.desc || '')}</span>
+      </div>
+      <button class="btn ghost mytpl-use" data-id="${esc(t.id)}">使用</button>
+      <button class="btn ghost mytpl-del" data-id="${esc(t.id)}" style="color:var(--red)">删除</button>
+    </div>`).join('');
+}
+$('myTplList').addEventListener('click', async e => {
+  const use = e.target.closest('.mytpl-use');
+  const del = e.target.closest('.mytpl-del');
+  if (!use && !del) return;
+  const id = (use || del).dataset.id;
+  if (use) {
+    $('tplSel').value = id;
+    onTplChange();
+    document.querySelector('input[name=stratSrc][value=template]').checked = true;
+    $('tplBox').style.display = '';
+    $('customBox').style.display = 'none';
+    renderParamsForSource();
+    return;
+  }
+  if (del && confirm('删除该本地模板？')) {
+    const resp = await fetch('/api/strategy/templates/custom/' + id, {method: 'DELETE'});
+    if (resp.ok) { logMsg('已删除本地模板'); loadTemplates(); }
+    else alert('删除失败');
+  }
+});
+
+$('saveTplBtn').addEventListener('click', async () => {
+  const code = $('editor').value;
+  if (!code.trim()) { alert('编辑器代码为空'); return; }
+  const name = prompt('模板名称：', '我的策略 ' + new Date().toISOString().slice(5, 10));
+  if (!name) return;
+  try {
+    const resp = await fetch('/api/strategy/templates/custom', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, code}),
+    });
+    const r = await resp.json();
+    if (!resp.ok) { alert('保存失败：\n' + (r.detail || '')); return; }
+    logMsg(`已保存本地模板：${r.template.name}`, 'ok');
+    await loadTemplates();
+    $('tplSel').value = r.template.id;
+    onTplChange();
+  } catch (e2) {
+    alert('网络错误: ' + e2.message);
+  }
+});
+
 /* ------------------------------------------------ 模板与参数 */
 async function loadTemplates(){
   const r = await (await fetch('/api/strategy/templates')).json();
-  TEMPLATES = r.templates;
+  TEMPLATES = r.templates || [];
+  CUSTOM_IDS = new Set(r.custom_ids || []);
   const sel = $('tplSel');
-  sel.innerHTML = TEMPLATES.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+  const builtin = TEMPLATES.filter(t => !CUSTOM_IDS.has(t.id));
+  const custom = TEMPLATES.filter(t => CUSTOM_IDS.has(t.id));
+  let html = builtin.map(t =>
+    `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+  if (custom.length) {
+    html += `<optgroup label="── 我的模板 ──">` + custom.map(t =>
+      `<option value="${t.id}">★ ${esc(t.name)}</option>`).join('') + `</optgroup>`;
+  }
+  sel.innerHTML = html;
   if (LAST_TPL_ID) sel.value = LAST_TPL_ID;
   onTplChange();
+  renderMyTplList();
 }
 async function loadGlossary(){
   const r = await (await fetch('/api/terms')).json();
@@ -619,10 +752,14 @@ function renderParams(){
   if (!t) return;
   const grid = $('gridMode').checked;
   const box = $('paramBox');
+  if (!(t.params || []).length) {
+    box.innerHTML = '<div class="hint">该模板没有可调参数，直接运行即可（参数可在代码编辑器中修改）</div>';
+    return;
+  }
   if (!grid) {
     box.innerHTML = t.params.map(p => `
       <div class="param-grid" style="margin-bottom:4px">
-        <span class="p-label">${T(p.label)}（${esc(p.name)}）</span>
+        <span class="p-label">${T(p.label)}（${esc(p.name)}${p.unit ? ' · ' + esc(p.unit) : ''}）</span>
         <input type="number" data-pname="${esc(p.name)}"
                value="${p.default}" min="${p.min}" max="${p.max}" step="${p.step}">
       </div>`).join('');
@@ -1160,7 +1297,7 @@ $('histBody').addEventListener('click', async e => {
     // 术语表先行：参数区渲染时 T() 才能包出 .term
     await loadGlossary();
     termifyStatic();
-    await Promise.all([loadDatas(), loadTemplates(), loadProviders(), loadHistory()]);
+    await Promise.all([loadDatas(), loadTemplates(), loadProviders(), loadHistory(), loadMarket('')]);
   } catch (e) {
     showError('初始化失败: ' + e);
     logMsg('初始化失败: ' + e, 'err');

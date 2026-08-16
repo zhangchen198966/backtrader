@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 """runner 后端行为测试：ECharts 数据 / 多数据对比 / 优化 / 错误路径"""
+import os
+
 import pytest
 
 from webapp.tests.conftest import run_runner, simple_backtest_request, REPO_ROOT
@@ -99,6 +101,42 @@ def test_bad_data_path(tmp_path):
         simple_backtest_request('datas/not-exist.txt'), tmp_path)
     assert status == 'error'
     assert '不存在' in error
+
+
+def test_backtest_with_saved_custom_template(tmp_path, monkeypatch):
+    """自定义保存的模板能走完整回测链路（runner 按 id 从本地库取代码）"""
+    import webapp.templatestore as ts
+    store = tmp_path / 'tpl.json'
+    monkeypatch.setattr(ts, 'STORE_PATH', str(store))
+    code = ("import backtrader as bt\n\n"
+            "class SavedStrat(bt.Strategy):\n"
+            "    params = dict(fast=5, slow=20)\n\n"
+            "    def __init__(self):\n"
+            "        self.crossover = bt.ind.CrossOver(\n"
+            "            bt.ind.SMA(period=self.p.fast),\n"
+            "            bt.ind.SMA(period=self.p.slow))\n"
+            "        self.order = None\n\n"
+            "    def notify_order(self, order):\n"
+            "        if order.status in (order.Submitted, order.Accepted):\n"
+            "            return\n"
+            "        self.order = None\n\n"
+            "    def next(self):\n"
+            "        if self.order:\n"
+            "            return\n"
+            "        if not self.position and self.crossover[0] > 0:\n"
+            "            self.order = self.buy()\n"
+            "        elif self.position and self.crossover[0] < 0:\n"
+            "            self.order = self.close()\n")
+    entry = ts.add_custom('runner测试模板', code)
+
+    req = simple_backtest_request(DATA1, template=entry['id'],
+                                  params={'fast': 5, 'slow': 20})
+    run_env = {**os.environ, 'BT_LAB_TPL_STORE': str(store)}
+    status, result, error = run_runner(req, tmp_path, env=run_env)
+    assert status == 'done', error
+    s = result['runs'][0]['summary']
+    assert s['total_return_pct'] is not None
+    assert result['runs'][0]['chart']['dates']
 
 
 def test_multi_data_limit(tmp_path):

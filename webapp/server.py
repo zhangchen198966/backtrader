@@ -22,7 +22,10 @@ from webapp.datainspect import inspect_csv
 from webapp.datasource import (PROVIDERS, FetchError, fetch_to_csv,
                                search_indexes, search_stocks)
 from webapp.glossary import get_glossary
-from webapp.templates import TEMPLATES
+from webapp.strategy_market import MarketError, catalog, import_from_market
+from webapp.templatestore import (TemplateError, add_custom, delete_custom,
+                                  find_custom, list_custom)
+from webapp.templates import TEMPLATES, get_template
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEBAPP_DIR = os.path.join(REPO_ROOT, 'webapp')
@@ -313,7 +316,46 @@ def api_datas_delete(path: str):
 
 @app.get('/api/strategy/templates')
 def api_templates():
-    return {'templates': TEMPLATES}
+    """内置模板 + 本地保存的模板（自定义/市场导入）"""
+    custom = list_custom()
+    return {'templates': TEMPLATES + custom,
+            'custom_ids': [t['id'] for t in custom]}
+
+
+@app.post('/api/strategy/templates/custom')
+def api_save_template(body: dict):
+    """自定义代码保存为本地模板（校验必须含 bt.Strategy 子类）"""
+    try:
+        entry = add_custom(body.get('name') or '', body.get('code') or '')
+    except TemplateError as e:
+        raise HTTPException(400, str(e))
+    return {'template': entry}
+
+
+@app.delete('/api/strategy/templates/custom/{tid}')
+def api_delete_template(tid: str):
+    if not delete_custom(tid):
+        raise HTTPException(404, '模板不存在')
+    return {'deleted': tid}
+
+
+@app.get('/api/strategy/market')
+def api_market(q: str = ''):
+    """在线模板市场目录（关键词过滤）"""
+    return {'market': catalog(q)}
+
+
+@app.post('/api/strategy/market/import')
+def api_market_import(body: dict):
+    """从市场导入：下载源码 → 抽取策略类 → 校验 → 入本地模板库"""
+    try:
+        entry = import_from_market(body.get('id') or '',
+                                   name_override=body.get('name'))
+    except MarketError as e:
+        raise HTTPException(400, str(e))
+    except TemplateError as e:
+        raise HTTPException(400, str(e))
+    return {'template': entry}
 
 
 @app.get('/api/terms')
@@ -332,6 +374,18 @@ def api_run(body: dict):
             raise HTTPException(400, '未选择数据文件')
     elif not path:
         raise HTTPException(400, '未选择数据文件')
+
+    # 本地保存的模板在提交时解析成代码放进请求：
+    # runner 是子进程，不依赖本进程的存储路径
+    strat = body.get('strategy') or {}
+    tid = strat.get('template_id')
+    if strat.get('source') == 'template' and tid and not get_template(tid):
+        cust = find_custom(tid)
+        if not cust:
+            raise HTTPException(400, f'未知策略模板: {tid}')
+        strat['code'] = cust['code']
+        strat['resolved_params_meta'] = cust.get('params') or []
+
     task_id = manager.submit(body)
     return {'task_id': task_id}
 
