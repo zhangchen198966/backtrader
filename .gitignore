@@ -78,3 +78,4 @@ webapp/tasks/
 webapp/uploads/
 demo_backtest.png
 webapp/cache/
+.btlab.pid
