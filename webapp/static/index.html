@@ -100,6 +100,15 @@ select:focus,input:focus{border-color:var(--accent)}
 .tk-num{color:var(--tk-num)}
 .tk-com{color:var(--tk-com);font-style:italic}
 .tk-bi{color:var(--tk-bi)}
+/* 批量参数组编辑器 */
+#batchEditor table{width:100%;font-size:12px}
+#batchEditor th,#batchEditor td{padding:4px 6px;white-space:nowrap}
+#batchEditor input{padding:4px 6px;font-size:12px;min-width:64px;width:100%}
+#batchEditor .be-name input{min-width:90px}
+#batchEditor .be-del{color:var(--red);cursor:pointer;padding:2px 6px;user-select:none}
+#batchEditor .be-del:hover{background:var(--red);color:#fff;border-radius:4px}
+#batchEditor .be-add{margin-top:6px}
+
 /* 全屏模板市场 */
 #marketBtn{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
   border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;}
@@ -337,7 +346,9 @@ footer{display:flex;gap:8px;flex-wrap:wrap;padding:0 20px 16px;
   <details open id="paramSection"><summary>策略参数</summary><div class="body">
     <div class="radio-row" style="margin-bottom:2px">
       <label><input type="checkbox" id="gridMode"> <span class="tlabel">网格模式（用于参数优化）</span></label>
+      <label><input type="checkbox" id="batchMode"> <span class="tlabel">批量对比（多组参数一次跑，同图比较）</span></label>
     </div>
+    <div id="batchEditor" style="display:none"></div>
     <div id="paramBox"><div class="hint">选择模板后在此调参</div></div>
   </div></details>
 
@@ -360,6 +371,7 @@ footer{display:flex;gap:8px;flex-wrap:wrap;padding:0 20px 16px;
   <div class="run-bar">
     <button class="btn" id="runBtn">▶ 运行回测</button>
     <button class="btn" id="optBtn" style="background:var(--green)">⇥ 运行优化</button>
+    <button class="btn" id="batchBtn" style="background:#b8860b;display:none">⚡ 批量对比</button>
     <button class="btn danger" id="killBtn" style="display:none">终止</button>
   </div>
   <div class="hint" id="runHint"></div>
@@ -1001,6 +1013,167 @@ function setSrv(ok){
   $('srvText').textContent = ok ? '服务正常' : '服务异常';
 }
 $('srvBadge').addEventListener('click', () => { logMsg('手动检测服务状态…'); heartbeat(); });
+
+/* ------------------------------------------------ 批量对比回测 */
+const BATCH_ROWS = [];   // [{name, params:{}}]
+function renderBatchEditor(){
+  const t = currentTpl();
+  const box = $('batchEditor');
+  if (!t || !(t.params || []).length) {
+    box.innerHTML = '<div class="hint">该模板无可调参数，无法批量对比</div>';
+    return;
+  }
+  if (!BATCH_ROWS.length) {
+    // 默认三组：标准 / 灵敏(参数-30%) / 迟钝(参数+50%)
+    const mk = (label, f) => {
+      const params = {};
+      t.params.forEach(p => {
+        params[p.name] = p.int ? Math.max(1, Math.round(p.default * f))
+                                : Math.round(p.default * f * 100) / 100;
+      });
+      return {name: label, params};
+    };
+    BATCH_ROWS.push(mk('标准', 1.0), mk('灵敏', 0.7), mk('迟钝', 1.5));
+  }
+  const cols = t.params.map(p =>
+    `<th title="${esc(p.label)}（${esc(p.unit || '')}）">${esc(p.name)}</th>`).join('');
+  const rows = BATCH_ROWS.map((r, i) => `<tr>
+      <td class="be-name"><input type="text" data-bi="${i}" data-f="name" value="${esc(r.name)}"></td>
+      ${t.params.map(p => `<td><input type="number" data-bi="${i}" data-f="p:${esc(p.name)}"
+        value="${r.params[p.name]}" step="${p.step}"></td>`).join('')}
+      <td><span class="be-del" data-bi="${i}">✕</span></td>
+    </tr>`).join('');
+  box.innerHTML = `<table><thead><tr><th>名称</th>${cols}<th></th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    <button class="btn ghost be-add">+ 添加一组（复制最后一行）</button>`;
+}
+$('batchEditor').addEventListener('input', e => {
+  const el = e.target;
+  const bi = el.dataset.bi, f = el.dataset.f;
+  if (bi === undefined || !f) return;
+  const row = BATCH_ROWS[parseInt(bi)];
+  if (!row) return;
+  if (f === 'name') row.name = el.value;
+  else if (f.startsWith('p:')) row.params[f.slice(2)] = parseFloat(el.value);
+});
+$('batchEditor').addEventListener('click', e => {
+  const del = e.target.closest('.be-del');
+  if (del) {
+    if (BATCH_ROWS.length > 2) { BATCH_ROWS.splice(parseInt(del.dataset.bi), 1); renderBatchEditor(); }
+    return;
+  }
+  if (e.target.closest('.be-add')) {
+    const last = BATCH_ROWS[BATCH_ROWS.length - 1];
+    BATCH_ROWS.push({name: last.name + '+', params: {...last.params}});
+    renderBatchEditor();
+  }
+});
+function setBatchMode(on){
+  $('batchMode').checked = on;
+  $('batchEditor').style.display = on ? '' : 'none';
+  $('batchBtn').style.display = on ? '' : 'none';
+  if (on) {
+    $('gridMode').checked = false;
+    renderParams();
+    renderBatchEditor();
+    $('paramSection').open = true;
+  }
+}
+$('batchMode').addEventListener('change', e => {
+  if (e.target.checked) setBatchMode(true);
+  else { $('batchEditor').style.display = 'none'; $('batchBtn').style.display = 'none'; }
+});
+$('gridMode').addEventListener('change', e => {
+  if (e.target.checked) setBatchMode(false);
+});
+
+async function runBatch(){
+  const paths = selectedPaths();
+  if (paths.length !== 1) { alert('批量对比仅支持勾选 1 个数据文件'); return; }
+  if (BATCH_ROWS.length < 2) { alert('至少 2 组参数'); return; }
+  const src = document.querySelector('input[name=stratSrc]:checked').value;
+  if (src !== 'template') { alert('批量对比基于策略模板（自定义代码请先保存为模板）'); return; }
+  const req = buildRequest('batch');
+  req.strategy.batches = BATCH_ROWS.map(r => ({name: r.name || '组', params: {...r.params}}));
+  delete req.strategy.params;
+  setBusy(true);
+  showStatus('批量对比运行中…', true);
+  hideError();
+  $('resultArea').innerHTML = '<div class="empty">批量对比执行中…</div>';
+  logMsg(`批量对比已提交：${req.strategy.batches.length} 组参数`);
+  try {
+    const r = await (await fetch('/api/run', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(req),
+    })).json();
+    if (!r.task_id) throw new Error(r.detail || '提交失败');
+    CUR_TASK = r.task_id;
+    pollBatch(r.task_id);
+  } catch (e) {
+    setBusy(false);
+    showStatus('提交失败: ' + e.message, false, true);
+  }
+}
+$('batchBtn').addEventListener('click', runBatch);
+
+function pollBatch(id){
+  clearInterval(POLL_TIMER);
+  POLL_TIMER = setInterval(async () => {
+    let t;
+    try { t = await (await fetch('/api/task/' + id)).json(); }
+    catch { return; }
+    if (t.status === 'queued') showStatus('排队等待中…', true);
+    else if (t.status === 'running') showStatus('批量对比运行中…', true);
+    else {
+      clearInterval(POLL_TIMER);
+      setBusy(false);
+      loadHistory();
+      if (t.status === 'done') { hideStatus(); renderBatch(t); }
+      else { showStatus('运行失败', false, true); showError(t.error || '未知错误'); }
+    }
+  }, 1000);
+}
+
+let BATCH_RESULT = null;
+function renderBatch(t){
+  BATCH_RESULT = t.result;
+  const r = t.result;
+  let html = `<h3 class="sec">批量对比 · 归一化权益曲线（${esc(r.template_id || '')}，${r.batches.length} 组参数）</h3>`
+    + chartBlock('batchChart', 'small', '同一策略不同参数的差异（终点高低=最终收益，波动=稳定性）')
+    + `<h3 class="sec">指标对比</h3><div class="tablewrap"><table id="batchTable"><thead><tr>
+       <th class="txt">名称</th><th class="txt">参数</th><th>总收益率</th><th>年化</th>
+       <th>夏普</th><th>最大回撤</th><th>胜率</th><th>盈/亏</th></tr></thead><tbody>`
+    + r.comparison.map((c, i) => {
+        const ps = Object.entries(c.params).map(([k, v]) => `${k}=${v}`).join(' ');
+        return `<tr data-i="${i}" class="batch-row">
+          <td class="txt"><b>${esc(c.name)}</b></td>
+          <td class="txt" title="${esc(ps)}">${esc(ps.slice(0, 40))}</td>
+          <td class="${cls(c.total_return_pct)}">${(c.total_return_pct > 0 ? '+' : '') + fmt(c.total_return_pct)}%</td>
+          <td class="${cls(c.annual_pct)}">${fmt(c.annual_pct)}%</td>
+          <td>${fmt(c.sharpe, 3)}</td>
+          <td class="down">${fmt(c.max_dd_pct)}%</td>
+          <td>${c.winrate_pct === null ? '—' : c.winrate_pct + '%'}</td>
+          <td>${r.batches[i].summary.won} / ${r.batches[i].summary.lost}</td></tr>`;
+      }).join('')
+    + `</tbody></table></div>
+    <div class="hint" style="margin:8px 0">点击行查看该参数组的完整回测详情（图表/交易明细）</div>
+    <div id="batchDetail"></div>`;
+  $('resultArea').innerHTML = html;
+  const el = $('batchChart');
+  if (el) {
+    const ch = makeChart(el);
+    if (ch) ch.setOption(B.buildBatchOption(r.comparison, CUR_THEME));
+  }
+}
+document.addEventListener('click', e => {
+  const tr = e.target.closest('#batchTable tbody tr');
+  if (!tr || !BATCH_RESULT) return;
+  const batch = BATCH_RESULT.batches[parseInt(tr.dataset.i)];
+  // 复用单次回测渲染：构造单 run 的伪结果
+  renderBacktest({result: {mode: 'backtest', multi: false, runs: [batch],
+                           comparison: [BATCH_RESULT.comparison[parseInt(tr.dataset.i)]]}});
+  $('batchDetail').innerHTML = '';
+  window.scrollTo({top: 0, behavior: 'smooth'});
+});
 
 /* ------------------------------------------------ 请求与轮询 */
 function buildRequest(mode){

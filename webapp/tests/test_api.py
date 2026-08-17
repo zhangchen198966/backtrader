@@ -201,6 +201,16 @@ def test_run_validation():
     r = client.post('/api/run', json={'mode': 'backtest',
                                       'data': {'path': []}})
     assert r.status_code == 400
+    # batch 模式合法
+    r = client.post('/api/run', json={
+        'mode': 'batch',
+        'data': {'path': ['datas/2006-day-001.txt']},
+        'strategy': {'source': 'template', 'template_id': 'sma_cross',
+                     'batches': [{'name': 'a', 'params': {'fast': 5}},
+                                 {'name': 'b', 'params': {'fast': 10}}]},
+        'broker': {'cash': 100000}, 'sizer': {'type': 'percent', 'value': 90}})
+    assert r.status_code == 200
+
     # 合法请求（多数据 list 形式）能拿到 task_id（排队但不真正等待执行）
     r = client.post('/api/run', json={
         'mode': 'backtest',

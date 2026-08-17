@@ -24,8 +24,9 @@ pytestmark = pytest.mark.e2e
 
 
 def wait_done(page, timeout=120):
-    """等待任务完成：卡片/优化图/错误框任一可见（:visible 防止锚定隐藏元素）"""
-    page.wait_for_selector('.card:visible, #optChart:visible, #errorBox:visible',
+    """等待任务完成：卡片/优化图/批量对比/错误框任一可见"""
+    page.wait_for_selector('.card:visible, #optChart:visible, '
+                           '#batchChart:visible, #errorBox:visible',
                            timeout=timeout * 1000)
 
 
@@ -324,6 +325,52 @@ def test_kline_yaxis_rescales_on_zoom(page):
     page.wait_for_timeout(400)
     restored = yaxis_range()
     assert abs((restored['max'] - restored['min']) - full_span) < full_span * 0.05
+
+
+# ---------------------------------------------------------------- 批量对比回测
+
+def test_batch_backtest_flow(page):
+    """任务2：批量回测——多组参数一次跑，同图叠加对比 + 指标表 + 行点击详情"""
+    uncheck_all_data(page)
+    check_data(page, DATA1)
+    page.select_option('#tplSel', 'supertrend')
+    page.wait_for_timeout(300)
+
+    # 开启批量模式：编辑器出现 3 行默认参数组，批量按钮可见
+    page.check('#batchMode')
+    page.wait_for_selector('#batchEditor table tbody tr', timeout=5000)
+    rows = page.locator('#batchEditor tbody tr').count()
+    assert rows == 3, f'默认应有 3 组参数（实际 {rows}）'
+    assert page.locator('#batchBtn').is_visible()
+
+    # 修改第一组名称与参数
+    page.fill('#batchEditor tbody tr:first-child input[data-f="name"]', '我的标准组')
+    page.fill('#batchEditor tbody tr:first-child input[data-f="p:atr_period"]', '10')
+    page.fill('#batchEditor tbody tr:first-child input[data-f="p:multiplier"]', '3')
+
+    # 运行批量
+    page.click('#batchBtn')
+    wait_done(page, timeout=180)
+    assert page.locator('#errorBox').is_hidden()
+
+    # 叠加权益图（ECharts canvas）+ 指标对比表 3 行
+    assert page.locator('#batchChart canvas').count() >= 1
+    assert page.locator('#batchTable tbody tr').count() == 3
+    table_text = page.locator('#batchTable').inner_text()
+    assert '我的标准组' in table_text
+    assert '总收益率' in page.locator('#batchTable thead').inner_text()
+
+    # ECharts series 数量 = 3 组
+    n_series = page.evaluate(
+        'echarts.getInstanceByDom(document.getElementById("batchChart"))'
+        '.getOption().series.length')
+    assert n_series == 3
+
+    # 行点击 → 展开该组完整回测（绩效卡片 + K线图）
+    page.locator('#batchTable tbody tr').first.click()
+    page.wait_for_selector('.card', timeout=10000)
+    assert page.locator('.card').count() == 12
+    assert page.locator('#kchart0 canvas').count() >= 1
 
 
 # ---------------------------------------------------------------- UI：年度条形图 / 服务徽章 / 日志坞
@@ -709,11 +756,14 @@ def test_market_overlay_and_import(page):
 
     page.locator('.mo-tab[data-cat="community"]').click()
     page.wait_for_selector('.mkt-card', timeout=10000)
-    page.locator('.mkt-card[data-id="mk-stoch-sr"] .mkt-import').click()
-    page.wait_for_timeout(1500)
-    # 导入成功 → 我的模板分类出现
+    imp = page.locator('.mkt-card[data-id="mk-stoch-sr"] .mkt-import')
+    imp.click()
+    # 等导入流程结束（按钮文案复位，网络下载可能耗时数秒）
+    page.wait_for_function(
+        '() => { const b = document.querySelector(\'.mkt-card[data-id="mk-stoch-sr"] .mkt-import\');'
+        ' return b && !b.disabled; }', timeout=60000)
     page.locator('.mo-tab[data-cat="mine"]').click()
-    page.wait_for_timeout(400)
+    page.wait_for_selector('#mktGrid .mkt-card', timeout=15000)
     assert '随机指标' in page.locator('#mktGrid').inner_text()
 
     # 「使用」：关闭 overlay 并选中模板

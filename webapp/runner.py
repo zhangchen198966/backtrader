@@ -425,6 +425,57 @@ def run_backtest(req, task_dir):
         json.dump(result, f, ensure_ascii=False)
 
 
+# ---------------------------------------------------------------- batch
+
+def run_batch(req, task_dir):
+    """批量对比回测：同一数据/策略，不同参数组各跑一次，汇总对比。"""
+    paths = data_paths(req['data'])
+    if len(paths) != 1:
+        raise RequestError('批量对比仅支持单个数据文件')
+    batches = req['strategy'].get('batches') or []
+    if not isinstance(batches, list) or len(batches) < 2:
+        raise RequestError('批量对比至少需要 2 组参数')
+    if len(batches) > 12:
+        raise RequestError('批量对比最多 12 组参数')
+
+    results = []
+    for i, b in enumerate(batches):
+        name = (b.get('name') or f'组{i + 1}').strip() or f'组{i + 1}'
+        params = b.get('params') or {}
+        if not isinstance(params, dict):
+            raise RequestError(f'参数组「{name}」的 params 必须是对象')
+        spec = dict(req['strategy'])
+        spec['params'] = params
+        spec.pop('batches', None)
+        run = run_one_backtest({**req, 'strategy': spec}, paths[0])
+        results.append({'name': name, 'params': params,
+                        'summary': run['summary'], 'yearly': run['yearly'],
+                        'trades': run['trades'], 'chart': run['chart'],
+                        'log': run.get('log', [])})
+
+    comparison = []
+    for r in results:
+        eq = r['chart']['equity']
+        base = eq[0][1] or 1.0 if eq else 1
+        comparison.append({
+            'name': r['name'],
+            'params': r['params'],
+            'total_return_pct': r['summary']['total_return_pct'],
+            'annual_pct': r['summary']['annual_pct'],
+            'sharpe': r['summary']['sharpe'],
+            'max_dd_pct': r['summary']['max_dd_pct'],
+            'winrate_pct': r['summary']['winrate_pct'],
+            'equity_dates': [d for d, _ in eq],
+            'equity_norm': [round(v / base * 100, 2) for _, v in eq],
+        })
+
+    result = {'mode': 'batch', 'data_name': results[0].get('data_name'),
+              'template_id': req['strategy'].get('template_id'),
+              'batches': results, 'comparison': comparison}
+    with open(os.path.join(task_dir, 'result.json'), 'w') as f:
+        json.dump(result, f, ensure_ascii=False)
+
+
 # ---------------------------------------------------------------- optimize
 
 def run_optimize(req, task_dir):
@@ -513,8 +564,11 @@ def main():
 
     _set_status(task_dir, STATUS_RUNNING)
     try:
-        if req.get('mode') == 'optimize':
+        mode = req.get('mode')
+        if mode == 'optimize':
             run_optimize(req, task_dir)
+        elif mode == 'batch':
+            run_batch(req, task_dir)
         else:
             run_backtest(req, task_dir)
         _set_status(task_dir, STATUS_DONE)

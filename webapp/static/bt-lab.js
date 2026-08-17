@@ -420,6 +420,39 @@
     };
   }
 
+  /** 批量回测对比：多参数组归一化权益曲线叠加（一个图看差异） */
+  function buildBatchOption(comparison, theme) {
+    const c = themeColors(theme);
+    const ax = baseAxisColors(theme);
+    const series = (comparison || []).map(function (b) {
+      const ds = b.equity_dates || [], vs = b.equity_norm || [];
+      const label = b.name + '  ' + Object.keys(b.params || {}).slice(0, 3)
+        .map(function (k) { return k + '=' + b.params[k]; }).join(' ');
+      return {
+        name: label, type: 'line', showSymbol: false, smooth: false,
+        data: ds.map(function (d, j) { return [d, vs[j]]; }),
+        lineStyle: { width: 1.8 }, emphasis: { focus: 'series' },
+        endLabel: { show: true, formatter: function (p) { return b.name; },
+                    color: c.txt, fontSize: 11 },
+      };
+    });
+    return {
+      animation: false, backgroundColor: 'transparent',
+      tooltip: { trigger: 'axis', backgroundColor: c.panel, borderColor: c.line,
+        textStyle: { color: c.txt, fontSize: 12 },
+        valueFormatter: function (v) { return v == null ? '—' : v.toFixed(2); } },
+      legend: { top: 0, type: 'scroll', textStyle: { color: ax.txt, fontSize: 11 } },
+      grid: { left: 60, right: 90, top: 40, bottom: 50 },
+      xAxis: { type: 'time', axisLabel: { color: ax.txt },
+        axisLine: { lineStyle: { color: ax.axis } } },
+      yAxis: { scale: true, axisLabel: { color: ax.txt,
+          formatter: function (v) { return v.toFixed(0); } },
+        splitLine: { lineStyle: { color: ax.split } } },
+      dataZoom: [{ type: 'inside' }],
+      series: series,
+    };
+  }
+
   return {
     THEME_COLORS: THEME_COLORS,
     normalizeTheme: normalizeTheme,
@@ -438,6 +471,7 @@
     buildCandleOption: buildCandleOption,
     buildOptChartOption: buildOptChartOption,
     buildCompareOption: buildCompareOption,
+    buildBatchOption: buildBatchOption,
     computeVisibleRange: computeVisibleRange,
     attachAutoScale: attachAutoScale,
   };

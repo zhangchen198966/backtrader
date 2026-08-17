@@ -69,8 +69,22 @@ def live_server():
             json.dump(seed, f, ensure_ascii=False)
 
     port = 8601
-    with socket.socket() as s:
-        s.bind(('127.0.0.1', port))
+    # 硬化端口竞争：清残留进程 + 等待端口释放（最多 15s）
+    import subprocess as _sp
+    try:
+        _sp.run('lsof -ti :8601 | xargs kill -9', shell=True,
+                capture_output=True, timeout=10)
+    except Exception:
+        pass
+    for _ in range(30):
+        try:
+            with socket.socket() as s:
+                s.bind(('127.0.0.1', port))
+            break
+        except OSError:
+            time.sleep(0.5)
+    else:
+        raise RuntimeError('测试端口 8601 无法释放')
     import tempfile
     tpl_store = os.path.join(tempfile.gettempdir(), 'btlab-e2e-templates.json')
     if os.path.exists(tpl_store):

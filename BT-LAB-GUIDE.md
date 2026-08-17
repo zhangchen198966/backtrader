@@ -192,6 +192,16 @@ webapp/
 - Medium/知乎/CSDN：登录墙/反爬；且完整代码作者通常最终也放 GitHub
 - 文章型源基础设施已就绪并有完整测试覆盖，任何可访问网页 5 分钟可接入
 
+**批量对比回测**（mode='batch'）：请求 strategy.batches=[{name, params}×2..12]，
+runner 逐组独立跑完整回测并保留各自图表/交易数据，comparison 含归一化权益曲线
+（起点=100）与核心指标；前端叠加权益图 + 指标对比表，行点击复用单次回测渲染看详情。
+与 optimize 的分工：optimize 穷举网格找参数（表格+热力图），batch 跑精选参数组对比曲线。
+
+**内置模板实现注意事项**：策略实例属性禁止命名 stop/order 以外的生命周期方法名
+（如 self.stop 会覆盖 Strategy.stop() 导致 float not callable）；自定义指标
+（如 SuperTrend）在 code 里定义即可，params 元数据/单位/术语表需同步补齐，
+test_all_builtin_templates_run 会真实回测每个模板。
+
 **加术语**：`glossary.py` 加词条即可，前后端自动生效（前端经 /api/terms 拉取）。注意长词优先机制：新词条若是现有词的子串，会优先匹配长词。
 
 **加分析器/绩效指标**：runner.py `run_one_backtest` 里 `cerebro.addanalyzer(...)` → `summarize()` 提取 → 前端 `renderBacktest` 加卡片（label 走 `T()` 自动获得术语 tips）。

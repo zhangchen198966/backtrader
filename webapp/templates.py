@@ -172,6 +172,165 @@ class MacdSignal(bt.Strategy):
             self.order = self.close()
 ''',
     },
+
+    {
+        'id': 'supertrend',
+        'name': '超级趋势 SuperTrend（ATR 通道翻转）',
+        'desc': '源自 TradingView 经典规则：价格 ± N 倍 ATR 构成动态通道，趋势随价格'
+                '突破上下轨翻转，翻多做多、翻空平仓。趋势行情利器，震荡市易被反复打脸。',
+        'params': [
+            {'name': 'atr_period', 'label': 'ATR周期', 'default': 10, 'min': 2, 'max': 100, 'step': 1, 'int': True, 'unit': 'bar 数'},
+            {'name': 'multiplier', 'label': '通道倍数', 'default': 3.0, 'min': 0.5, 'max': 10.0, 'step': 0.5, 'int': False, 'unit': '倍 ATR'},
+        ],
+        'code': '''\
+import backtrader as bt
+
+
+class SuperTrendInd(bt.Indicator):
+    """SuperTrend 指标（TradingView 标准算法）"""
+    params = dict(period=10, multiplier=3.0)
+    lines = ('supertrend', 'direction')
+    plotinfo = dict(subplot=False)
+
+    def __init__(self):
+        atr = bt.ind.ATR(self.data, period=self.p.period)
+        hl2 = (self.data.high + self.data.low) / 2.0
+        basic_upper = hl2 + self.p.multiplier * atr
+        basic_lower = hl2 - self.p.multiplier * atr
+        self.l.supertrend = bt.ind.If(self.l.direction < 0, basic_upper, basic_lower)
+
+    def next(self):
+        d = self.l.direction
+        if len(self) < 2:
+            d[0] = 1
+            return
+        prev = d[-1]
+        if prev > 0:
+            d[0] = -1 if self.data.close[0] < self.l.supertrend[-1] else 1
+        else:
+            d[0] = 1 if self.data.close[0] > self.l.supertrend[-1] else -1
+
+
+class SuperTrendStrategy(bt.Strategy):
+    params = dict(atr_period=10, multiplier=3.0)
+
+    def __init__(self):
+        self.st = SuperTrendInd(self.data, period=self.p.atr_period,
+                                multiplier=self.p.multiplier)
+        self.order = None
+
+    def notify_order(self, order):
+        if order.status in (order.Submitted, order.Accepted):
+            return
+        self.order = None
+
+    def next(self):
+        if self.order or len(self) < self.p.atr_period + 2:
+            return
+        d = self.st.lines.direction[0]
+        pd = self.st.lines.direction[-1]
+        if not self.position and d > 0 and pd < 0:
+            self.order = self.buy()
+        elif self.position and d < 0 and pd > 0:
+            self.order = self.close()
+''',
+    },
+    {
+        'id': 'turtle_donchian',
+        'name': '海龟法则 · Donchian 通道突破（简化版）',
+        'desc': '源自知乎《史上最详尽的海龟交易法则笔记》：突破 N1 日最高价入场、'
+                '跌破 N2 日最低价离场（经典 20/10），可选 ATR 止损。趋势跟踪经典。',
+        'params': [
+            {'name': 'entry_period', 'label': '入场突破周期', 'default': 20, 'min': 5, 'max': 100, 'step': 1, 'int': True, 'unit': 'bar 数'},
+            {'name': 'exit_period', 'label': '离场突破周期', 'default': 10, 'min': 3, 'max': 100, 'step': 1, 'int': True, 'unit': 'bar 数'},
+            {'name': 'atr_stop', 'label': 'ATR止损倍数(0=关)', 'default': 2.0, 'min': 0, 'max': 10.0, 'step': 0.5, 'int': False, 'unit': '倍 ATR'},
+        ],
+        'code': '''\
+import backtrader as bt
+
+
+class TurtleDonchian(bt.Strategy):
+    params = dict(entry_period=20, exit_period=10, atr_stop=2.0)
+
+    def __init__(self):
+        self.upper = bt.ind.Highest(self.data.high, period=self.p.entry_period)
+        self.lower = bt.ind.Lowest(self.data.low, period=self.p.exit_period)
+        self.atr = bt.ind.ATR(self.data, period=14)
+        self.order = None
+        self.stop_price = None  # 不能叫 self.stop：会覆盖 Strategy.stop() 生命周期方法
+
+    def notify_order(self, order):
+        if order.status in (order.Submitted, order.Accepted):
+            return
+        self.order = None
+
+    def next(self):
+        if self.order or len(self) < self.p.entry_period + 1:
+            return
+        close = self.data.close[0]
+        if not self.position:
+            if close > self.upper[-1]:
+                self.order = self.buy()
+                self.stop_price = (close - self.p.atr_stop * self.atr[0]
+                                   if self.p.atr_stop > 0 else None)
+        else:
+            if self.stop_price is not None:
+                self.stop_price = max(self.stop_price,
+                                      close - self.p.atr_stop * self.atr[0])
+            if close < self.lower[-1] or                     (self.stop_price is not None and close < self.stop_price):
+                self.order = self.close()
+                self.stop_price = None
+''',
+    },
+    {
+        'id': 'squeeze_momentum',
+        'name': '布林挤压 Squeeze Momentum',
+        'desc': '源自通道突破对比研究：布林带收窄进肯特纳通道=波动挤压，挤压释放时'
+                '按动量方向入场，动量转弱离场。等待波动率扩张的入场时机。',
+        'params': [
+            {'name': 'bb_period', 'label': '布林周期', 'default': 20, 'min': 5, 'max': 100, 'step': 1, 'int': True, 'unit': 'bar 数'},
+            {'name': 'bb_dev', 'label': '布林标准差倍数', 'default': 2.0, 'min': 0.5, 'max': 4.0, 'step': 0.25, 'int': False, 'unit': '标准差倍数'},
+            {'name': 'kc_mult', 'label': '肯特纳通道倍数', 'default': 1.5, 'min': 0.5, 'max': 4.0, 'step': 0.25, 'int': False, 'unit': '倍 ATR'},
+        ],
+        'code': '''\
+import backtrader as bt
+
+
+class SqueezeMomentum(bt.Strategy):
+    params = dict(bb_period=20, bb_dev=2.0, kc_mult=1.5)
+
+    def __init__(self):
+        self.bb = bt.ind.BollingerBands(self.data.close, period=self.p.bb_period,
+                                        devfactor=self.p.bb_dev)
+        kc_mid = bt.ind.EMA(self.data.close, period=self.p.bb_period)
+        atr = bt.ind.ATR(self.data, period=self.p.bb_period)
+        self.kc_upper = kc_mid + self.p.kc_mult * atr
+        self.kc_lower = kc_mid - self.p.kc_mult * atr
+        mid = (self.bb.lines.mid + kc_mid) / 2.0
+        self.mom = bt.ind.EMA(self.data.close - mid, period=3)
+        self.order = None
+
+    def notify_order(self, order):
+        if order.status in (order.Submitted, order.Accepted):
+            return
+        self.order = None
+
+    def next(self):
+        if self.order or len(self) < self.p.bb_period + 3:
+            return
+        squeeze_on = (self.bb.lines.top[0] < self.kc_upper[0] and
+                      self.bb.lines.bot[0] > self.kc_lower[0])
+        squeeze_was_on = (self.bb.lines.top[-1] < self.kc_upper[-1] and
+                          self.bb.lines.bot[-1] > self.kc_lower[-1])
+        released = squeeze_was_on and not squeeze_on
+        if not self.position:
+            if released and self.mom[0] > 0:
+                self.order = self.buy()
+        else:
+            if self.mom[0] < 0 or self.data.close[0] < self.bb.lines.bot[0]:
+                self.order = self.close()
+''',
+    },
 ]
 
 TEMPLATE_IDS = [t['id'] for t in TEMPLATES]

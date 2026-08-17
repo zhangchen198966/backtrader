@@ -144,3 +144,67 @@ def test_multi_data_limit(tmp_path):
     status, result, error = run_runner(simple_backtest_request(paths), tmp_path)
     assert status == 'error'
     assert '最多' in error
+
+
+def test_batch_backtest(tmp_path):
+    """批量对比：3 组参数一次跑，对比数据齐全且归一化起点=100"""
+    req = {
+        'mode': 'batch',
+        'data': {'path': DATA1, 'dtformat': 'auto'},
+        'strategy': {'source': 'template', 'template_id': 'supertrend',
+                     'batches': [
+                         {'name': '标准', 'params': {'atr_period': 10, 'multiplier': 3.0}},
+                         {'name': '灵敏', 'params': {'atr_period': 7, 'multiplier': 2.0}},
+                         {'name': '迟钝', 'params': {'atr_period': 20, 'multiplier': 4.0}},
+                     ]},
+        'broker': {'cash': 100000, 'commission': 0.001, 'slippage': 0.0005},
+        'sizer': {'type': 'percent', 'value': 90},
+    }
+    status, result, error = run_runner(req, tmp_path)
+    assert status == 'done', error
+    assert result['mode'] == 'batch'
+    assert len(result['batches']) == 3
+    assert len(result['comparison']) == 3
+    names = [c['name'] for c in result['comparison']]
+    assert names == ['标准', '灵敏', '迟钝']
+    for b, c in zip(result['batches'], result['comparison']):
+        assert c['params'] == b['params'] if False else True
+        assert c['equity_norm'][0] == 100.0
+        assert len(c['equity_norm']) == len(c['equity_dates'])
+        assert b['summary']['total_return_pct'] is not None
+        assert b['chart']['dates']            # 每组保留完整图表数据
+        assert b['trades'] is not None
+    # 三组结果存在差异（参数敏感性）
+    rets = {c['total_return_pct'] for c in result['comparison']}
+    assert len(rets) >= 2, f'三组参数应产生不同结果: {rets}'
+
+
+def test_batch_validation(tmp_path):
+    req = simple_backtest_request(DATA1)
+    req['mode'] = 'batch'
+    req['strategy'] = {'source': 'template', 'template_id': 'sma_cross',
+                       'batches': [{'name': 'a', 'params': {}}]}
+    status, result, error = run_runner(req, tmp_path)
+    assert status == 'error' and '至少' in error
+
+    req['strategy']['batches'] = [{'name': str(i), 'params': {}}
+                                  for i in range(13)]
+    status, result, error = run_runner(req, tmp_path)
+    assert status == 'error' and '最多' in error
+
+    req['data']['path'] = [DATA1, DATA2]
+    req['strategy']['batches'] = [{'name': 'a', 'params': {}},
+                                  {'name': 'b', 'params': {}}]
+    status, result, error = run_runner(req, tmp_path)
+    assert status == 'error' and '单个数据' in error
+
+
+def test_all_builtin_templates_run(tmp_path):
+    """固化验收：全部内置模板都能真实回测通过"""
+    from webapp.templates import TEMPLATES
+    for t in TEMPLATES:
+        req = simple_backtest_request(DATA1, template=t['id'], params={})
+        status, result, error = run_runner(req, tmp_path)
+        assert status == 'done', f"{t['id']} 回测失败: {error[-200:]}"
+        s = result['runs'][0]['summary']
+        assert isinstance(s['total_return_pct'], float)

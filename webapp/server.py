@@ -58,8 +58,14 @@ class TaskManager:
         self.worker.start()
 
     def submit(self, request):
-        task_id = time.strftime('%Y%m%d-%H%M%S') + '-%04x' % (int(time.time() * 16) & 0xffff)
+        base = time.strftime('%Y%m%d-%H%M%S')
+        task_id = base + '-%04x' % (int(time.time() * 16) & 0xffff)
         task_dir = os.path.join(TASKS_DIR, task_id)
+        n = 0
+        while os.path.exists(task_dir):  # 毫秒级并发提交时保证唯一
+            n += 1
+            task_id = f'{base}-{n:04d}'
+            task_dir = os.path.join(TASKS_DIR, task_id)
         os.makedirs(task_dir)
         with open(os.path.join(task_dir, 'request.json'), 'w') as f:
             json.dump(request, f, ensure_ascii=False)
@@ -385,8 +391,8 @@ def api_terms():
 
 @app.post('/api/run')
 def api_run(body: dict):
-    if body.get('mode') not in ('backtest', 'optimize'):
-        raise HTTPException(400, 'mode 必须是 backtest 或 optimize')
+    if body.get('mode') not in ('backtest', 'optimize', 'batch'):
+        raise HTTPException(400, 'mode 必须是 backtest / optimize / batch')
     path = (body.get('data') or {}).get('path')
     if isinstance(path, list):
         if not path:
