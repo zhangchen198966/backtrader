@@ -21,7 +21,8 @@ from pydantic import BaseModel
 
 from webapp.datainspect import inspect_csv
 from webapp.datasource import (PROVIDERS, FetchError, fetch_to_csv,
-                               search_indexes, search_stocks)
+                               search_indexes, search_stocks,
+                               search_yahoo)
 from webapp.glossary import get_glossary
 from webapp.strategy_market import MarketError, catalog, import_from_market
 from webapp.templatestore import (TemplateError, add_custom, delete_custom,
@@ -306,7 +307,7 @@ def api_search(q: str = '', provider: str = 'akshare-a'):
         if provider == 'akshare-index':
             results = search_indexes(q)
         elif provider == 'yfinance':
-            results = []  # 无中文名清单，保持手输
+            results = search_yahoo(q)
         else:
             results = search_stocks(q)
         return {'results': results}

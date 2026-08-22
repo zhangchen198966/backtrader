@@ -835,6 +835,21 @@ def test_fetch_panel_date_pickers_and_symbol_search(page):
     page.wait_for_selector('#symDrop .symopt', timeout=10000)
     assert 'sh000001' in page.locator('#symDrop .symopt').first.inner_text()
 
+    # 6) Yahoo 源：中文搜索 → 苹果/AAPL；点选回填代码
+    page.select_option('#fetchProvider', 'yfinance')
+    page.fill('#fetchSymbol', '苹果')
+    page.wait_for_selector('#symDrop .symopt', timeout=10000)
+    first = page.locator('#symDrop .symopt').first.inner_text()
+    assert 'AAPL' in first and '苹果' in first
+    page.locator('#symDrop .symopt').first.click()
+    page.wait_for_timeout(200)
+    assert page.locator('#fetchSymbol').input_value() == 'AAPL'
+
+    # 英文搜索同样可用
+    page.fill('#fetchSymbol', 'tesla')
+    page.wait_for_selector('#symDrop .symopt', timeout=10000)
+    assert 'TSLA' in page.locator('#symDrop .symopt').first.inner_text()
+
 
 # ---------------------------------------------------------------- 历史批量删除
 

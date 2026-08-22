@@ -243,7 +243,7 @@ def test_search_api(seeded_list, monkeypatch):
     assert any(x['code'] == 'sh000001' for x in res)
 
     r = client.get('/api/datas/search', params={'q': 'AAPL', 'provider': 'yfinance'})
-    assert r.json()['results'] == []
+    assert r.json()['results'][0]['code'] == 'AAPL'
 
 
 def test_search_api_graceful_on_load_failure(monkeypatch):
@@ -348,3 +348,52 @@ def test_fetch_api_network_error_message(monkeypatch):
         'start': '2024-01-01', 'end': '2024-12-31'})
     assert r.status_code == 400
     assert '网络' in r.json()['detail'] or '抓取失败' in r.json()['detail']
+
+
+# ------------------------------------------------ Yahoo 代码搜索
+
+def test_search_yahoo_by_chinese_name():
+    from webapp.datasource import search_yahoo
+    r = search_yahoo('苹果')
+    assert r and r[0]['code'] == 'AAPL'
+    r = search_yahoo('腾讯')
+    codes = {x['code'] for x in r}
+    assert '00700.HK' in codes and 'TCEHY' in codes
+
+
+def test_search_yahoo_by_english():
+    from webapp.datasource import search_yahoo
+    # 英文名包含（大小写不敏感）
+    assert search_yahoo('apple')[0]['code'] == 'AAPL'
+    assert any(x['code'] == 'TSLA' for x in search_yahoo('tesla'))
+    # 代码前缀（大小写不敏感）优先
+    assert search_yahoo('aapl')[0]['code'] == 'AAPL'
+    assert search_yahoo('007')[0]['code'] == '00700.HK'
+    # 港股后缀
+    assert any(x['code'].endswith('.HK') for x in search_yahoo('hk')[:6])
+
+
+def test_search_yahoo_edges():
+    from webapp.datasource import search_yahoo
+    assert search_yahoo('') != []           # 空查询返回推荐列表
+    assert search_yahoo('不存在的xyzabc') == []
+
+
+def test_search_yahoo_table_quality():
+    from webapp.datasource import YAHOO_SYMBOLS
+    assert len(YAHOO_SYMBOLS) >= 45
+    codes = [x['code'] for x in YAHOO_SYMBOLS]
+    assert len(codes) == len(set(codes)), '代码不得重复'
+    for x in YAHOO_SYMBOLS:
+        assert x['code'] and x['name'] and x['en']
+
+
+def test_search_api_yahoo_provider():
+    import webapp.server as srv
+    from webapp.datasource import search_yahoo
+    monkey = None
+    r = client.get('/api/datas/search',
+                   params={'q': '苹果', 'provider': 'yfinance'})
+    assert r.status_code == 200
+    res = r.json()['results']
+    assert res and res[0]['code'] == 'AAPL'

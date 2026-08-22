@@ -55,7 +55,7 @@ PROVIDERS = {
     },
     'yfinance': {
         'label': '美股/全球 · Yahoo Finance',
-        'hint': '如 AAPL 苹果、MSFT 微软、00700.HK 腾讯、TSLA；Yahoo 接口有频率限制且国内网络常需代理',
+        'hint': '输入代码或中文名，如 AAPL / 苹果 / 腾讯 / 00700.HK；接口有频率限制且国内网络常需代理',
         'symbol_re': r'^[A-Za-z0-9.\-^=]{1,20}$',
         'symbol_hint': '请输入有效的 Yahoo 代码',
     },
@@ -123,6 +123,86 @@ def rows_to_csv(rows):
     w.writerow(['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'OpenInterest'])
     w.writerows(rows)
     return buf.getvalue()
+
+
+# Yahoo Finance 精选代码表（美股 / 中概 ADR / 港股 / 指数 / ETF / 大宗）
+# Yahoo 无公开中文名接口，内置人工维护的常用对照，覆盖日常搜索需求
+YAHOO_SYMBOLS = [
+    # 美股科技/大盘
+    {'code': 'AAPL', 'name': '苹果', 'en': 'Apple'},
+    {'code': 'MSFT', 'name': '微软', 'en': 'Microsoft'},
+    {'code': 'GOOGL', 'name': '谷歌', 'en': 'Alphabet Google'},
+    {'code': 'AMZN', 'name': '亚马逊', 'en': 'Amazon'},
+    {'code': 'META', 'name': 'Meta脸书', 'en': 'Meta Platforms Facebook'},
+    {'code': 'NVDA', 'name': '英伟达', 'en': 'NVIDIA'},
+    {'code': 'TSLA', 'name': '特斯拉', 'en': 'Tesla'},
+    {'code': 'AMD', 'name': '超威半导体', 'en': 'AMD'},
+    {'code': 'INTC', 'name': '英特尔', 'en': 'Intel'},
+    {'code': 'NFLX', 'name': '奈飞', 'en': 'Netflix'},
+    {'code': 'AVGO', 'name': '博通', 'en': 'Broadcom'},
+    {'code': 'JPM', 'name': '摩根大通', 'en': 'JPMorgan Chase'},
+    {'code': 'V', 'name': '维萨', 'en': 'Visa'},
+    {'code': 'KO', 'name': '可口可乐', 'en': 'Coca-Cola'},
+    {'code': 'WMT', 'name': '沃尔玛', 'en': 'Walmart'},
+    {'code': 'XOM', 'name': '埃克森美孚', 'en': 'Exxon Mobil'},
+    {'code': 'BRK-B', 'name': '伯克希尔', 'en': 'Berkshire Hathaway'},
+    # 中概 ADR
+    {'code': 'BABA', 'name': '阿里巴巴', 'en': 'Alibaba'},
+    {'code': 'JD', 'name': '京东', 'en': 'JD.com'},
+    {'code': 'PDD', 'name': '拼多多', 'en': 'PDD Holdings'},
+    {'code': 'BIDU', 'name': '百度', 'en': 'Baidu'},
+    {'code': 'NTES', 'name': '网易', 'en': 'NetEase'},
+    {'code': 'NIO', 'name': '蔚来', 'en': 'NIO'},
+    {'code': 'XPEV', 'name': '小鹏汽车', 'en': 'XPeng'},
+    {'code': 'LI', 'name': '理想汽车', 'en': 'Li Auto'},
+    {'code': 'BILI', 'name': '哔哩哔哩', 'en': 'Bilibili'},
+    {'code': 'TME', 'name': '腾讯音乐', 'en': 'Tencent Music'},
+    {'code': 'IQ', 'name': '爱奇艺', 'en': 'iQIYI'},
+    {'code': 'TCEHY', 'name': '腾讯控股ADR', 'en': 'Tencent ADR'},
+    # 港股
+    {'code': '00700.HK', 'name': '腾讯控股', 'en': 'Tencent'},
+    {'code': '09988.HK', 'name': '阿里巴巴-W', 'en': 'Alibaba HK'},
+    {'code': '03690.HK', 'name': '美团-W', 'en': 'Meituan'},
+    {'code': '01810.HK', 'name': '小米集团-W', 'en': 'Xiaomi'},
+    {'code': '09618.HK', 'name': '京东集团-SW', 'en': 'JD HK'},
+    {'code': '09888.HK', 'name': '百度集团-SW', 'en': 'Baidu HK'},
+    {'code': '09999.HK', 'name': '网易-SW', 'en': 'NetEase HK'},
+    {'code': '02318.HK', 'name': '中国平安', 'en': 'Ping An'},
+    {'code': '01299.HK', 'name': '友邦保险', 'en': 'AIA'},
+    {'code': '01398.HK', 'name': '工商银行H', 'en': 'ICBC HK'},
+    {'code': '00388.HK', 'name': '香港交易所', 'en': 'HKEX'},
+    {'code': '00005.HK', 'name': '汇丰控股', 'en': 'HSBC'},
+    # 指数 / ETF / 大宗
+    {'code': '^GSPC', 'name': '标普500指数', 'en': 'S&P 500'},
+    {'code': '^IXIC', 'name': '纳斯达克指数', 'en': 'NASDAQ Composite'},
+    {'code': '^DJI', 'name': '道琼斯指数', 'en': 'Dow Jones'},
+    {'code': '^HSI', 'name': '恒生指数', 'en': 'Hang Seng'},
+    {'code': 'SPY', 'name': '标普500ETF', 'en': 'SPDR S&P 500 ETF'},
+    {'code': 'QQQ', 'name': '纳指100ETF', 'en': 'Invesco QQQ'},
+    {'code': 'BTC-USD', 'name': '比特币', 'en': 'Bitcoin'},
+    {'code': 'GC=F', 'name': '黄金期货', 'en': 'Gold Futures'},
+    {'code': 'CL=F', 'name': '原油期货', 'en': 'Crude Oil WTI'},
+]
+
+
+def search_yahoo(q, limit=15):
+    """Yahoo 代码搜索：代码前缀优先，其次中文名/英文名包含（大小写不敏感）"""
+    q = (q or '').strip()
+    if not q:
+        return YAHOO_SYMBOLS[:limit]
+    lq = q.lower()
+    by_code, by_name = [], []
+    for sym in YAHOO_SYMBOLS:
+        if sym['code'].lower().startswith(lq):
+            by_code.append(sym)
+        elif q in sym['name'] or lq in sym['en'].lower():
+            by_name.append(sym)
+        if len(by_code) >= limit:
+            break
+    out = by_code[:limit]
+    if len(out) < limit:
+        out += by_name[:limit - len(out)]
+    return out
 
 
 # ---------------------------------------------------------------- 各源抓取

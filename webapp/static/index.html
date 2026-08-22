@@ -558,7 +558,7 @@ function onProviderChange(){
   if (r) $('fetchHint').innerHTML = B.wrapTerms(r.hint, GLOSSARY);
   const isA = id === 'akshare-a';
   $('fetchSymbol').placeholder = isA ? '输入代码或名称，如 600519 / 茅台'
-    : (id === 'akshare-index' ? '输入代码或名称，如 sh000001 / 上证' : '如 AAPL / 00700.HK');
+    : (id === 'akshare-index' ? '输入代码或名称，如 sh000001 / 上证' : '输入代码/中文名，如 AAPL / 苹果 / 00700.HK');
   hideSymDrop();
   $('symPicked').textContent = '';
   $('fetchSymbol').dataset.code = '';
@@ -585,7 +585,7 @@ function renderSymDrop(){
 async function symSearch(){
   const q = $('fetchSymbol').value.trim();
   const provider = $('fetchProvider').value;
-  if (provider === 'yfinance' || !q) { hideSymDrop(); return; }
+  if (!q) { hideSymDrop(); return; }
   try {
     const r = await (await fetch(`/api/datas/search?q=${encodeURIComponent(q)}&provider=${provider}`)).json();
     SYM_ITEMS = r.results || [];
