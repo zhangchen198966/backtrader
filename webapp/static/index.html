@@ -253,6 +253,10 @@ tr:hover td{background:var(--panel2)}
 .ld-line.ok{color:var(--green)}
 .ld-line .ldt{color:var(--accent);margin-right:6px}
 /* 历史任务表 */
+.hist-toolbar{display:flex;align-items:center;gap:12px;padding:6px 0 8px}
+.hist-toolbar .ht-selall{display:flex;align-items:center;gap:5px;
+  color:var(--sub);font-size:12px;cursor:pointer}
+.hist-toolbar .ld-spacer{flex:1}
 #histBody table{width:100%;font-size:12px}
 #histBody th,#histBody td{padding:5px 8px;white-space:nowrap}
 #histBody .hst{padding:1px 8px;border-radius:8px;font-size:11px;
@@ -1509,7 +1513,14 @@ async function loadHistory(){
     body.innerHTML = '<div class="hist-empty">暂无历史任务</div>';
     return;
   }
-  body.innerHTML = `<table><thead><tr>
+  body.innerHTML = `<div class="hist-toolbar">
+      <label class="ht-selall"><input type="checkbox" id="histSelAll"> 全选</label>
+      <span id="histSelCount" class="hint"></span>
+      <span class="ld-spacer"></span>
+      <button class="btn ghost" id="histDelSel" style="color:var(--red)">删除选中</button>
+      <button class="btn ghost" id="histClearDone">清空已完成</button>
+    </div><table><thead><tr>
+      <th style="width:30px"></th>
       <th class="txt">时间</th><th>类型</th><th class="txt">策略</th><th class="txt">数据</th>
       <th class="txt">参数</th><th class="txt">结果</th><th>状态</th><th></th></tr></thead>
     <tbody>` + rows.map(t => {
@@ -1518,6 +1529,7 @@ async function loadHistory(){
         : '—';
       const st = esc(t.status || '');
       return `<tr data-id="${esc(t.id)}">
+        <td><input type="checkbox" class="histChk" value="${esc(t.id)}"></td>
         <td class="txt">${fmtTaskTime(t.id)}</td>
         <td>${t.mode === 'optimize' ? '优化' : '回测'}</td>
         <td class="txt" title="${esc(t.strategy || '')}">${esc((t.strategy || '').slice(0, 14)) || '—'}</td>
@@ -1529,7 +1541,40 @@ async function loadHistory(){
       </tr>`;
     }).join('') + '</tbody></table>';
 }
+function updateHistSelCount(){
+  const n = document.querySelectorAll('.histChk:checked').length;
+  $('histSelCount').textContent = n ? `已选 ${n} 项` : '';
+}
+$('histBody').addEventListener('change', e => {
+  if (e.target.classList.contains('histChk')) updateHistSelCount();
+  if (e.target.id === 'histSelAll') {
+    document.querySelectorAll('.histChk').forEach(c => { c.checked = e.target.checked; });
+    updateHistSelCount();
+  }
+});
+async function batchDeleteTasks(payload, confirmText){
+  if (!confirm(confirmText)) return;
+  const resp = await fetch('/api/tasks/batch-delete', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)});
+  if (!resp.ok) { alert('删除失败'); return; }
+  const r = await resp.json();
+  logMsg(`批量删除 ${r.deleted.length} 条历史任务` +
+         (r.blocked.length ? `（跳过运行中 ${r.blocked.length} 条）` : ''), 'ok');
+  await loadHistory();
+}
 $('histBody').addEventListener('click', async e => {
+  if (e.target.id === 'histDelSel') {
+    const ids = [...document.querySelectorAll('.histChk:checked')].map(c => c.value);
+    if (!ids.length) { alert('请先勾选要删除的任务'); return; }
+    await batchDeleteTasks({ids}, `删除选中的 ${ids.length} 条历史任务？`);
+    return;
+  }
+  if (e.target.id === 'histClearDone') {
+    await batchDeleteTasks({all_completed: true},
+      '清空全部已完成/失败的历史任务？（运行中的不受影响）');
+    return;
+  }
   const view = e.target.closest('.op.view');
   const del = e.target.closest('.op.del');
   if (!view && !del) return;

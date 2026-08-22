@@ -836,6 +836,52 @@ def test_fetch_panel_date_pickers_and_symbol_search(page):
     assert 'sh000001' in page.locator('#symDrop .symopt').first.inner_text()
 
 
+# ---------------------------------------------------------------- 历史批量删除
+
+def test_history_batch_delete(page):
+    """批量删除历史：复选框勾选 → 删除选中；全选联动；清空已完成"""
+    # 先跑两个任务制造历史
+    for _ in range(2):
+        uncheck_all_data(page)
+        check_data(page, DATA1)
+        page.select_option('#tplSel', 'sma_cross')
+        page.click('#runBtn')
+        wait_done(page)
+
+    page.click('#tabHist')
+    page.wait_for_selector('#histBody table tbody tr', timeout=10000)
+
+    # 工具栏可见：全选/删除选中/清空已完成
+    assert page.locator('#histSelAll').is_visible()
+    assert page.locator('#histDelSel').is_visible()
+    assert page.locator('#histClearDone').is_visible()
+
+    # 勾选第一行 → 计数显示
+    page.locator('.histChk').first.check()
+    page.wait_for_timeout(200)
+    assert '已选 1 项' in page.locator('#histSelCount').inner_text()
+    first_id = page.locator('#histBody tbody tr').first.get_attribute('data-id')
+
+    # 删除选中
+    page.on('dialog', lambda d: d.accept())
+    page.click('#histDelSel')
+    page.wait_for_timeout(800)
+    assert page.locator(f'#histBody tbody tr[data-id="{first_id}"]').count() == 0
+
+    # 全选 → 计数=行数 → 清空已完成
+    page.check('#histSelAll')
+    page.wait_for_timeout(200)
+    n_rows = page.locator('#histBody tbody tr').count()
+    n_chk = page.locator('.histChk:checked').count()
+    assert n_chk == n_rows and n_rows >= 1
+
+    page.click('#histClearDone')
+    page.wait_for_timeout(800)
+    remaining = page.locator('#histBody tbody tr').count()
+    if remaining == 0:
+        assert '暂无历史任务' in page.locator('#histBody').inner_text()
+
+
 # ---------------------------------------------------------------- 回归：错误体验
 
 def test_custom_code_error_still_shows_traceback(page):

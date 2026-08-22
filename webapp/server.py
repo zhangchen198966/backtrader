@@ -7,6 +7,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -227,6 +228,11 @@ class FetchBody(BaseModel):
     end: str
 
 
+class BatchDeleteBody(BaseModel):
+    ids: list = []
+    all_completed: bool = False
+
+
 class RunBody(BaseModel):
     mode: str = 'backtest'
 
@@ -424,6 +430,48 @@ def api_task(task_id: str):
 def api_task_kill(task_id: str):
     ok = manager.kill(task_id)
     return {'killed': ok}
+
+
+@app.post('/api/tasks/batch-delete')
+def api_tasks_batch_delete(body: BatchDeleteBody):
+    """批量删除历史任务。运行中的任务会被跳过并在 blocked 中返回。"""
+    if body.all_completed:
+        ids = []
+        for task_id in sorted(os.listdir(TASKS_DIR), reverse=True):
+            task_dir = os.path.join(TASKS_DIR, task_id)
+            if not os.path.isdir(task_dir):
+                continue
+            try:
+                with open(os.path.join(task_dir, 'status')) as f:
+                    if f.read().strip() not in ('running', 'queued'):
+                        ids.append(task_id)
+            except OSError:
+                ids.append(task_id)
+    else:
+        ids = body.ids or []
+        if len(ids) > 200:
+            raise HTTPException(400, '单次最多删除 200 条')
+
+    with manager.lock:
+        current = manager.current
+    deleted, blocked, missing = [], [], []
+    for tid in ids:
+        if not re.fullmatch(r'[0-9a-zA-Z\-]+', str(tid)):
+            missing.append(tid)
+            continue
+        if tid == current:
+            blocked.append(tid)
+            continue
+        task_dir = os.path.join(TASKS_DIR, tid)
+        if not os.path.isdir(task_dir):
+            missing.append(tid)
+            continue
+        if tid in manager.queue:
+            with manager.lock:
+                manager.queue = deque(t for t in manager.queue if t != tid)
+        shutil.rmtree(task_dir, ignore_errors=True)
+        deleted.append(tid)
+    return {'deleted': deleted, 'blocked': blocked, 'missing': missing}
 
 
 @app.get('/api/tasks')

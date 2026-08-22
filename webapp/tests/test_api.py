@@ -226,3 +226,68 @@ def test_run_validation():
 def test_task_not_found():
     r = client.get('/api/task/not-exist-id')
     assert r.status_code == 404
+
+
+# ------------------------------------------------ 历史任务批量删除
+
+def _mk_task(tasks_dir, tid, status='done'):
+    import pathlib
+    d = pathlib.Path(tasks_dir) / tid
+    d.mkdir(parents=True, exist_ok=True)
+    (d / 'status').write_text(status)
+    (d / 'request.json').write_text('{}')
+    return str(d)
+
+
+def test_tasks_batch_delete_selected(tmp_path, monkeypatch):
+    import webapp.server as srv
+    monkeypatch.setattr(srv, 'TASKS_DIR', str(tmp_path))
+    _mk_task(tmp_path, '20260101-100000-aaaa')
+    _mk_task(tmp_path, '20260101-100001-bbbb')
+    _mk_task(tmp_path, '20260101-100002-cccc')
+
+    r = client.post('/api/tasks/batch-delete',
+                    json={'ids': ['20260101-100000-aaaa', '20260101-100001-bbbb']})
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body['deleted']) == 2
+    assert not (tmp_path / '20260101-100000-aaaa').exists()
+    assert (tmp_path / '20260101-100002-cccc').exists()  # 未选中的保留
+
+
+def test_tasks_batch_delete_blocks_running(tmp_path, monkeypatch):
+    import webapp.server as srv
+    monkeypatch.setattr(srv, 'TASKS_DIR', str(tmp_path))
+    _mk_task(tmp_path, '20260101-100000-run1', status='running')
+    _mk_task(tmp_path, '20260101-100001-done')
+    monkeypatch.setattr(srv.manager, 'current', '20260101-100000-run1')
+
+    r = client.post('/api/tasks/batch-delete',
+                    json={'ids': ['20260101-100000-run1', '20260101-100001-done']})
+    body = r.json()
+    assert body['blocked'] == ['20260101-100000-run1']
+    assert '20260101-100001-done' in body['deleted']
+    assert (tmp_path / '20260101-100000-run1').exists()
+
+
+def test_tasks_batch_delete_all_completed(tmp_path, monkeypatch):
+    import webapp.server as srv
+    monkeypatch.setattr(srv, 'TASKS_DIR', str(tmp_path))
+    _mk_task(tmp_path, '20260101-100000-d1', status='done')
+    _mk_task(tmp_path, '20260101-100001-e1', status='error')
+    _mk_task(tmp_path, '20260101-100002-run', status='running')
+    monkeypatch.setattr(srv.manager, 'current', '20260101-100002-run')
+
+    r = client.post('/api/tasks/batch-delete', json={'all_completed': True})
+    body = r.json()
+    assert set(body['deleted']) == {'20260101-100000-d1', '20260101-100001-e1'}
+    assert (tmp_path / '20260101-100002-run').exists()  # 运行中不动
+
+
+def test_tasks_batch_delete_invalid_id(tmp_path, monkeypatch):
+    import webapp.server as srv
+    monkeypatch.setattr(srv, 'TASKS_DIR', str(tmp_path))
+    r = client.post('/api/tasks/batch-delete', json={'ids': ['../etc/passwd']})
+    body = r.json()
+    assert body['deleted'] == [] and 'invalid' not in body['missing'][0]
+    assert len(body['missing']) == 1
